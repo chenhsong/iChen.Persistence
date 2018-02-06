@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>iChen.Persistence.Config</AssemblyName>
+    <RootNamespace>iChen.Persistence.Server</RootNamespace>
+    <Version>4.1.0.0</Version>
+    <Authors />
+    <Company>Chen Hsong Holdings Ltd.</Company>
+    <Product>iChen Persistence</Product>
+    <Description>Data persistence layer for iChen 4.0.</Description>
+    <Copyright>Copyright © 2016-2017 by Chen Hsong Holdings Ltd.  All rights reserved.</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.DotNet.Analyzers.Compatibility" Version="0.1.2-alpha" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="2.0.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="2.0.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="10.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="iChen.OpenProtocol">
+      <HintPath>..\lib\iChen.OpenProtocol.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Database\iChenServerDB.sdf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
