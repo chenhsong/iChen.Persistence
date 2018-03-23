@@ -55,7 +55,7 @@ namespace iChen.Persistence.Server
 		}
 
 		/// <remarks>This method is thread-safe.</remarks>
-		public static async Task AddControllerAsync (int ID, string orgId, string name, ControllerTypes type, string version, string model, string IPAddress, bool enabled = true)
+		public static async Task AddControllerAsync (int ID, string orgId, string name, ControllerTypes type, string version, string model, string IPAddress, bool enabled = true, double? geo_latitude = null, double? geo_longitude = null)
 		{
 			if (string.IsNullOrWhiteSpace(orgId)) throw new ArgumentNullException(nameof(orgId));
 			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
@@ -80,7 +80,9 @@ namespace iChen.Persistence.Server
 				Type = type,
 				Version = version,
 				Model = model,
-				IP = IPAddress
+				IP = IPAddress,
+				GeoLatitude = geo_latitude,
+				GeoLongitude = geo_longitude
 			};
 
 			using (var db = new ConfigDB(m_Schema, m_Version)) {
@@ -93,7 +95,7 @@ namespace iChen.Persistence.Server
 		}
 
 		/// <remarks>This method is thread-safe.</remarks>
-		public static async Task UpdateControllerAsync (int ID, bool enabled, string name, ControllerTypes type, string version, string model, string IPAddress)
+		public static async Task UpdateControllerAsync (int ID, bool enabled, string name, ControllerTypes type, string version, string model, string IPAddress, double? geo_latitude, double? geo_longitude)
 		{
 			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
 			if (type == ControllerTypes.Unknown) throw new ArgumentOutOfRangeException(nameof(type));
@@ -117,6 +119,8 @@ namespace iChen.Persistence.Server
 				ctrl.Version = version;
 				ctrl.Model = model;
 				ctrl.IP = IPAddress;
+				ctrl.GeoLatitude = geo_latitude;
+				ctrl.GeoLongitude = geo_longitude;
 				ctrl.Modified = DateTime.Now;
 
 				await db.SaveChangesAsync().ConfigureAwait(false);

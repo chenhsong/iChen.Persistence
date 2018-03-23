@@ -19,6 +19,8 @@ namespace iChen.Persistence.Server
 		public string Model { get; set; }
 		public string IP { get; set; }
 		public string LockIP { get; set; }    // Version_LockIP
+		public double? GeoLatitude { get; set; }
+		public double? GeoLongitude { get; set; }
 		public DateTime Created { get; set; } = DateTime.Now;
 		public DateTime? Modified { get; set; }
 

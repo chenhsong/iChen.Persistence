@@ -12,6 +12,7 @@ namespace iChen.Persistence.Server
 		public const ushort Version_Organization = 100;
 		public const ushort Version_TermialConfig = 100;
 		public const ushort Version_Controller_LockIP = 2;
+		public const ushort Version_Controller_Geo = 3;
 		public const ushort Version_Controller_TimeZoneOffset = 100;
 
 		public string Schema { get; private set; } = null;

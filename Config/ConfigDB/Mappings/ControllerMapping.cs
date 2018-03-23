@@ -37,6 +37,15 @@ namespace iChen.Persistence.Server
 				entity.Property(x => x.LockIP).HasColumnName("LockIP").HasColumnType("nvarchar(100)");
 			}
 
+			// LockIP field was added in version 3
+			if (m_Version < ConfigDB.Version_Controller_Geo) {
+				entity.Ignore(x => x.GeoLatitude);
+				entity.Ignore(x => x.GeoLongitude);
+			} else {
+				entity.Property(x => x.GeoLatitude).HasColumnName("GeoLatitude");
+				entity.Property(x => x.GeoLatitude).HasColumnName("GeoLongitude");
+			}
+
 			// TimeZoneOffset field was added in version 100
 			if (m_Version < ConfigDB.Version_Controller_TimeZoneOffset) {
 				entity.Ignore(x => x.TimeZoneOffset);
