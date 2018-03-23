@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace iChen.Persistence.Cloud
 {
-	public partial class DataArchive : IDisposable
+	public partial class OdbcStore : IDisposable
 	{
 		public const int RefreshInterval = 500;
 		public const int ErrorRefreshInterval = 15000;  // Retry every 15 seconds
@@ -25,11 +25,12 @@ namespace iChen.Persistence.Cloud
 
 		public event Action<string> OnLog;
 		public event Action<string> OnDebug;
+		public event Action<string> OnSQL;
 		public event Action<EntryBase, string> OnUploadSuccess;
 		public event Action<EntryBase, Exception, string> OnUploadError;
 		public event Action<Exception, string> OnError;
 
-		public DataArchive (Func<DbConnection> connectionFactory, Func<string, DbType, int, object, DbParameter> createSqlParameter, uint maxbuffer = MaxBufferSize)
+		public OdbcStore (Func<DbConnection> connectionFactory, Func<string, DbType, int, object, DbParameter> createSqlParameter, uint maxbuffer = MaxBufferSize)
 		{
 			if (connectionFactory == null) throw new ArgumentNullException(nameof(connectionFactory));
 			if (createSqlParameter == null) throw new ArgumentNullException(nameof(createSqlParameter));
@@ -123,7 +124,7 @@ namespace iChen.Persistence.Cloud
 			// This is why ValuesListForInsertStatement uses parameters instead of actual values
 			var sql = $"INSERT INTO {table} {entry.InsertStatement}";
 
-			//OnDebug?.Invoke("Database SQL = " + sql);
+			OnSQL?.Invoke("Database SQL = " + sql);
 
 			// Store to database
 
@@ -153,15 +154,15 @@ namespace iChen.Persistence.Cloud
 								if (entry is CycleData cycledata) {
 									if (cycledata.Data.Count > 0) {
 										sql = $"SELECT MAX(ID) FROM {Storage.CycleDataTable}";
-										//OnDebug?.Invoke(sql);
+										OnSQL?.Invoke(sql);
 
 										cmd.CommandText = sql;
 										var id = (int) await cmd.ExecuteScalarAsync();
-										OnDebug?.Invoke("New Cycle Data ID = " + id);
+										OnSQL?.Invoke("New Cycle Data ID = " + id);
 
 										sql = $"INSERT INTO {Storage.CycleDataValuesTable} (ID, VariableName, Value)\nVALUES";
 										sql += string.Join(",\n", cycledata.Data.Select(kv => $" ({id}, '{kv.Key}', {(float) kv.Value})"));
-										//OnDebug?.Invoke(sql);
+										OnSQL?.Invoke(sql);
 
 										cmd.CommandText = sql;
 										await cmd.ExecuteNonQueryAsync();

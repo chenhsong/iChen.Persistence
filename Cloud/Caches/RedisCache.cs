@@ -8,7 +8,7 @@ using StackExchange.Redis;
 namespace iChen.Persistence.Cloud
 {
 	/// <remarks>This type is thread-safe.</remarks>
-	public class CloudCache : ISharedCache
+	public class RedisCache : ISharedCache
 	{
 		private const int KeySpace = 1;   // 0 is reserved for Chen Hsong internal
 		private const string DefaultObjectType = nameof(iChen);
@@ -22,11 +22,11 @@ namespace iChen.Persistence.Cloud
 		private readonly ConnectionMultiplexer m_Cache = null;
 		private readonly IDatabase m_Database = null;
 
-		public CloudCache (string connection) : this(DefaultObjectType, connection)
+		public RedisCache (string connection) : this(DefaultObjectType, connection)
 		{
 		}
 
-		public CloudCache (string objType, string connection)
+		public RedisCache (string objType, string connection)
 		{
 			if (string.IsNullOrWhiteSpace(objType)) throw new ArgumentNullException(nameof(objType));
 			if (string.IsNullOrWhiteSpace(connection)) throw new ArgumentNullException(nameof(connection));

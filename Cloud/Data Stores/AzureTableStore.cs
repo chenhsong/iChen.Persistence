@@ -9,7 +9,7 @@ using Microsoft.WindowsAzure.Storage.Table;
 
 namespace iChen.Persistence.Cloud
 {
-	public partial class CloudStore : IDisposable
+	public partial class AzureTableStore : IDisposable
 	{
 		public const int RefreshInterval = 60000;
 		public const int MaxBatchSize = 99;
@@ -45,7 +45,7 @@ namespace iChen.Persistence.Cloud
 		public event Action<int, ICollection<EntryBase>, string> OnUploadError;
 		public event Action<Exception, string> OnError;
 
-		public CloudStore (string account, string signature, uint maxbuffer = MaxBufferSize)
+		public AzureTableStore (string account, string signature, uint maxbuffer = MaxBufferSize)
 		{
 			if (string.IsNullOrWhiteSpace(account)) throw new ArgumentNullException(nameof(account));
 			if (string.IsNullOrWhiteSpace(signature)) throw new ArgumentNullException(nameof(signature));

@@ -601,6 +601,8 @@ namespace iChen.Persistence.Cloud
 		public int? OperatorId { get; }
 
 		public string IP { get; }
+		public double? GeoLatitude { get; }
+		public double? GeoLongitude { get; }
 		public OpModes? OpMode { get; }
 		public JobModes? JobMode { get; }
 		public string JobCardId { get; }
@@ -611,8 +613,8 @@ namespace iChen.Persistence.Cloud
 
 		static Event ()
 		{
-			ClassInsertStatement = EntryBase.ClassInsertStatement.Replace(") VALUES (", ", IP, Connected, OpMode, JobMode, Operator, JobCard, Mold) VALUES (");
-			ClassInsertStatement = ClassInsertStatement.Substring(0, ClassInsertStatement.Length - 1) + ", ?, ?, ?, ?, ?, ?, ?)";
+			ClassInsertStatement = EntryBase.ClassInsertStatement.Replace(") VALUES (", ", IP, GeoLatitude, GeoLongitude, Connected, OpMode, JobMode, Operator, JobCard, Mold) VALUES (");
+			ClassInsertStatement = ClassInsertStatement.Substring(0, ClassInsertStatement.Length - 1) + ", ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 		}
 
 		/// <summary>Store a log message as an event</summary>
@@ -638,10 +640,12 @@ namespace iChen.Persistence.Cloud
 
 		/// <param name="jobcard">Use an empty string to clear this value. Null will be interpreted as no change.</param>
 		/// <param name="mold">Use Guid.Empty to clear this value. Null will be interpreted as no change.</param>
-		public Event (string orgId, uint controller, bool? connected, string IP, OpModes? opmode, JobModes? jobmode, string jobcard, int? user, Guid? mold, DateTimeOffset time = default(DateTimeOffset)) : base(orgId, controller, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
+		public Event (string orgId, uint controller, bool? connected, string IP, double? geo_latitude, double? geo_longitude, OpModes? opmode, JobModes? jobmode, string jobcard, int? user, Guid? mold, DateTimeOffset time = default(DateTimeOffset)) : base(orgId, controller, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
 		{
 			if (controller <= 0) throw new ArgumentOutOfRangeException(nameof(controller));
 			this.IP = IP;
+			this.GeoLatitude = geo_latitude;
+			this.GeoLongitude = geo_longitude;
 			this.OpMode = opmode;
 			this.JobMode = jobmode;
 			this.JobCardId = jobcard;
@@ -653,6 +657,8 @@ namespace iChen.Persistence.Cloud
 		public Event (DynamicTableEntity entity) : base(entity)
 		{
 			if (entity.Properties.TryGetValue("IP", out var prop)) IP = prop.StringValue;
+			if (entity.Properties.TryGetValue("GeoLatitude", out prop)) GeoLatitude = prop.DoubleValue;
+			if (entity.Properties.TryGetValue("GeoLongitude", out prop)) GeoLongitude = prop.DoubleValue;
 			if (entity.Properties.TryGetValue("Connected", out prop)) Connected = prop.BooleanValue;
 			if (entity.Properties.TryGetValue("OpMode", out prop) && prop.StringValue != null) OpMode = (OpModes) Enum.Parse(typeof(OpModes), prop.StringValue, true);
 			if (entity.Properties.TryGetValue("JobMode", out prop) && prop.StringValue != null) JobMode = (JobModes) Enum.Parse(typeof(JobModes), prop.StringValue, true);
@@ -666,6 +672,8 @@ namespace iChen.Persistence.Cloud
 		public Event (DataRow drow) : base(drow)
 		{
 			if (IsColumnAvailable(drow, "IP")) this.IP = drow["IP"].ToString();
+			if (IsColumnAvailable(drow, "GeoLatitude")) this.GeoLatitude = (double) drow["GeoLatitude"];
+			if (IsColumnAvailable(drow, "GeoLongitude")) this.GeoLongitude = (double) drow["GeoLongitude"];
 			if (IsColumnAvailable(drow, "Connected")) this.Connected = (bool) drow["Connected"];
 			if (IsColumnAvailable(drow, "OpMode")) this.OpMode = (OpModes) (byte) drow["OpMode"];
 			if (IsColumnAvailable(drow, "JobMode")) this.JobMode = (JobModes) (byte) drow["JobMode"];
@@ -678,6 +686,8 @@ namespace iChen.Persistence.Cloud
 		{
 			var entity = base.ToEntity(rowkey);
 			if (IP != null) entity.Properties["IP"] = new EntityProperty(IP);
+			if (GeoLatitude.HasValue) entity.Properties["GeoLatitude"] = new EntityProperty(GeoLatitude.Value);
+			if (GeoLongitude.HasValue) entity.Properties["GeoLongitude"] = new EntityProperty(GeoLongitude.Value);
 			if (Connected.HasValue) entity.Properties["Connected"] = new EntityProperty(Connected);
 			if (OpMode.HasValue) entity.Properties["OpMode"] = new EntityProperty(OpMode.Value.ToString());
 			if (JobMode.HasValue) entity.Properties["JobMode"] = new EntityProperty(JobMode.Value.ToString());
@@ -698,6 +708,8 @@ namespace iChen.Persistence.Cloud
 			base.AddSqlParameters(parameters, makeParam);
 
 			parameters.Add(makeParam("IP", DbType.AnsiString, 25, (object) IP ?? DBNull.Value));
+			parameters.Add(makeParam("GeoLatitude", DbType.Double, 0, GeoLatitude.HasValue ? (object) GeoLatitude.Value : DBNull.Value));
+			parameters.Add(makeParam("GeoLongitude", DbType.Double, 0, GeoLongitude.HasValue ? (object) GeoLongitude.Value : DBNull.Value));
 			parameters.Add(makeParam("Connected", DbType.Boolean, 0, Connected.HasValue ? (object) Connected.Value : DBNull.Value));
 			parameters.Add(makeParam("OpMode", DbType.Byte, 0, OpMode.HasValue ? (object) OpMode : DBNull.Value));
 			parameters.Add(makeParam("JobMode", DbType.Byte, 0, JobMode.HasValue ? (object) JobMode : DBNull.Value));
