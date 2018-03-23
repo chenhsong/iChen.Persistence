@@ -68,7 +68,8 @@ namespace iChen.Persistence.Server
 			{
 				IsEnabled = enabled,
 				Name = name,
-				ControllerId = controller
+				ControllerId = controller,
+				Guid = Guid.NewGuid()
 			};
 
 			using (var db = new ConfigDB(m_Schema)) {
@@ -109,7 +110,8 @@ namespace iChen.Persistence.Server
 			{
 				IsEnabled = enabled,
 				Name = name,
-				ControllerId = controller
+				ControllerId = controller,
+				Guid = Guid.NewGuid()
 			};
 
 			using (var db = new ConfigDB(m_Schema)) {
