@@ -19,12 +19,12 @@ namespace iChen.Persistence.Server
 			entity.ToTable("MoldSettings", m_Schema);
 			entity.HasKey(x => new { x.MoldId, x.Offset });
 
-			entity.Property(x => x.MoldId).HasColumnName("MoldId").IsRequired().HasColumnType("int");
-			entity.Property(x => x.Offset).HasColumnName("Offset").IsRequired().HasColumnType("smallint");
-			entity.Property(x => x.Value).HasColumnName("Value").IsRequired().HasColumnType("smallint");
+			entity.Property(x => x.MoldId).HasColumnName("MoldId").IsRequired();//.HasColumnType("int");
+			entity.Property(x => x.Offset).HasColumnName("Offset").IsRequired();//.HasColumnType("smallint");
+			entity.Property(x => x.Value).HasColumnName("Value").IsRequired();//.HasColumnType("smallint");
 			entity.Ignore(x => x.RawData);
-			entity.Property(x => x.Created).HasColumnName("Created").IsRequired().HasColumnType("datetime");
-			entity.Property(x => x.Modified).HasColumnName("Modified").HasColumnType("datetime");
+			entity.Property(x => x.Created).HasColumnName("Created").IsRequired();//.HasColumnType("datetime");
+			entity.Property(x => x.Modified).HasColumnName("Modified");//.HasColumnType("datetime");
 
 			entity.HasOne(a => a.Mold).WithMany(b => b.MoldSettings).IsRequired().HasForeignKey(c => c.MoldId);
 		}

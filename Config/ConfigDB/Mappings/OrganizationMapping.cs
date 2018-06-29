@@ -19,12 +19,12 @@ namespace iChen.Persistence.Server
 			entity.ToTable("Organizations", m_Schema);
 			entity.HasKey(x => x.ID);
 
-			entity.Property(x => x.ID).HasColumnName("ID").IsRequired().HasColumnType("nvarchar(100)");
-			entity.Property(x => x.Name).HasColumnName("Name").IsRequired().HasColumnType("nvarchar(100)");
-			entity.Property(x => x.TimeZoneOffset).HasColumnName("TimeZoneOffset").HasColumnType("real");
-			entity.Property(x => x.RestrictMoldsToJobCards).HasColumnName("RestrictMoldsToJobCards").IsRequired().HasColumnType("bit");
-			entity.Property(x => x.Created).HasColumnName("Created").IsRequired().HasColumnType("datetime");
-			entity.Property(x => x.Modified).HasColumnName("Modified").HasColumnType("datetime");
+			entity.Property(x => x.ID).HasColumnName("ID").IsRequired();//.HasColumnType("nvarchar(100)");
+			entity.Property(x => x.Name).HasColumnName("Name").IsRequired();//.HasColumnType("nvarchar(100)");
+			entity.Property(x => x.TimeZoneOffset).HasColumnName("TimeZoneOffset");//.HasColumnType("real");
+			entity.Property(x => x.RestrictMoldsToJobCards).HasColumnName("RestrictMoldsToJobCards").IsRequired();//.HasColumnType("bit");
+			entity.Property(x => x.Created).HasColumnName("Created").IsRequired();//.HasColumnType("datetime");
+			entity.Property(x => x.Modified).HasColumnName("Modified");//.HasColumnType("datetime");
 		}
 	}
 }

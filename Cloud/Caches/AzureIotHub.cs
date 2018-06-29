@@ -3,21 +3,30 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Azure.Devices;
 using Microsoft.Azure.Devices.Client;
 using Microsoft.Azure.Devices.Shared;
 using Newtonsoft.Json.Linq;
 
+using DoubleDict = System.Collections.Generic.IReadOnlyDictionary<string, double>;
+using ObjDict = System.Collections.Generic.IReadOnlyDictionary<string, object>;
+
 namespace iChen.Persistence.Cloud
 {
 	public class AzureIoTHub : ISharedCache
 	{
-		public readonly RegistryManager m_Server = null;
-		public readonly string DeviceConnectionStringFormat;
-		public readonly ConcurrentDictionary<uint, DeviceClient> m_Clients = new ConcurrentDictionary<uint, DeviceClient>();
+		public const string HeartBeatProperty = "LastHeartBeatTime";
 
-		private static readonly IReadOnlyDictionary<string, object> m_TextValueMaps = new Dictionary<string, object>(StringComparer.InvariantCultureIgnoreCase)
+		public readonly string DeviceConnectionStringFormat;
+		public readonly RegistryManager m_Server = null;
+		private readonly SemaphoreSlim m_ServerSyncLock = new SemaphoreSlim(1, 1);
+		public readonly ConcurrentDictionary<uint, (DeviceClient device, SemaphoreSlim sync)> m_Clients
+			= new ConcurrentDictionary<uint, (DeviceClient, SemaphoreSlim)>();
+
+
+		private static readonly ObjDict m_TextValueMaps = new Dictionary<string, object>(StringComparer.InvariantCultureIgnoreCase)
 		{
 			["NaN"] = double.NaN,
 			["PositiveInfinity"] = double.PositiveInfinity,
@@ -33,18 +42,30 @@ namespace iChen.Persistence.Cloud
 			this.m_Server = RegistryManager.CreateFromConnectionString(server_conn);
 		}
 
-		public void Dispose ()
+		public virtual void Dispose ()
 		{
-			foreach (var client in m_Clients.Values) client.Dispose();
+			foreach (var (device, sync) in m_Clients.Values) {
+				sync.Wait();
+				try { device.Dispose(); } finally { sync.Release(); }
+				sync.Dispose();
+			}
+
 			m_Clients.Clear();
 
-			if (m_Server != null) m_Server.Dispose();
+			if (m_Server != null) {
+				m_ServerSyncLock.Wait();
+				try { m_Server.Dispose(); } finally { m_ServerSyncLock.Release(); }
+				m_ServerSyncLock.Dispose();
+			}
 		}
 
-		private DeviceClient GetDeviceClient (uint id) =>
-			m_Clients.GetOrAdd(id, k => DeviceClient.CreateFromConnectionString(string.Format(DeviceConnectionStringFormat, k), Microsoft.Azure.Devices.Client.TransportType.Amqp));
+		private (DeviceClient device, SemaphoreSlim sync) GetDeviceClient (uint id) =>
+			m_Clients.GetOrAdd(id, k => (
+				device: DeviceClient.CreateFromConnectionString(string.Format(DeviceConnectionStringFormat, k), Microsoft.Azure.Devices.Client.TransportType.Amqp),
+				sync: new SemaphoreSlim(1, 1)
+			));
 
-		private double DecodeJObject (JObject jval, string field)
+		private static double DecodeJObject (JObject jval, string field)
 		{
 			if (!jval.TryGetValue(field, out var value)) throw new ArgumentOutOfRangeException(nameof(field), $"Invalid field: [{field}].");
 
@@ -54,7 +75,7 @@ namespace iChen.Persistence.Cloud
 			return value.Value<double>();
 		}
 
-		private object DecodeValue (object value)
+		private static object DecodeValue (object value)
 		{
 			switch (value) {
 				case int _:
@@ -114,24 +135,36 @@ namespace iChen.Persistence.Cloud
 		private async Task<Twin> GetTwinAsync (uint id)
 		{
 			if (m_Server != null) {
-				lock (m_Server) { return m_Server.GetTwinAsync(id.ToString()).Result; }
-			} else {
-				var client = GetDeviceClient(id);
+				await m_ServerSyncLock.WaitAsync().ConfigureAwait(false);
 
-				lock (client) { return client.GetTwinAsync().Result; }
+				try {
+					return await m_Server.GetTwinAsync(id.ToString()).ConfigureAwait(false);
+				} finally { m_ServerSyncLock.Release(); }
+			} else {
+				var (device, sync) = GetDeviceClient(id);
+
+				await sync.WaitAsync().ConfigureAwait(false);
+
+				try {
+					return await device.GetTwinAsync().ConfigureAwait(false);
+				} finally { sync.Release(); }
 			}
 		}
 
-		public async Task<IReadOnlyDictionary<string, object>> GetAsync (uint id)
+		public virtual async Task<(ObjDict dict, DateTimeOffset timestamp)> GetAsync (uint id)
 		{
 			Twin twin = await GetTwinAsync(id);
 
-			return twin.Properties.Reported
-								.Cast<KeyValuePair<string, object>>()
-								.ToDictionary(kv => kv.Key, kv => DecodeValue(kv.Value));
+			var dict = twin.Properties.Reported
+										.Cast<KeyValuePair<string, object>>()
+										.ToDictionary(kv => kv.Key, kv => DecodeValue(kv.Value));
+
+			var timestamp = new DateTimeOffset(twin.Properties.Reported.GetLastUpdated(), TimeSpan.Zero);
+
+			return (dict, timestamp);
 		}
 
-		public async Task<T> GetAsync<T> (uint id, string key)
+		public virtual async Task<T> GetAsync<T> (uint id, string key)
 		{
 			Twin twin = await GetTwinAsync(id);
 
@@ -149,7 +182,7 @@ namespace iChen.Persistence.Cloud
 			return (T) val;
 		}
 
-		public async Task<double> GetAsync (uint id, string key, string field)
+		public virtual async Task<double> GetAsync (uint id, string key, string field)
 		{
 			Twin twin = await GetTwinAsync(id);
 
@@ -158,7 +191,7 @@ namespace iChen.Persistence.Cloud
 			switch (twin.Properties.Reported[key]) {
 				case JObject jval: return DecodeJObject(jval, field);
 
-				case IReadOnlyDictionary<string, double> dict: {
+				case DoubleDict dict: {
 						if (!dict.TryGetValue(field, out var dval)) throw new ArgumentOutOfRangeException(nameof(field), $"Invalid field: [{field}].");
 						return dval;
 					}
@@ -167,36 +200,48 @@ namespace iChen.Persistence.Cloud
 			}
 		}
 
-		public async Task<bool> HasAsync (uint id, string key)
+		public virtual async Task<DateTimeOffset> GetTimeStampAsync (uint id)
+		{
+			Twin twin = await GetTwinAsync(id);
+
+			return new DateTimeOffset(twin.Properties.Reported.GetLastUpdated(), TimeSpan.Zero);
+		}
+
+		public virtual async Task<bool> HasAsync (uint id, string key)
 		{
 			Twin twin = await GetTwinAsync(id);
 
 			return twin.Properties.Reported.Contains(key);
 		}
 
+		public virtual Task MarkActiveAsync (uint id) => SetAsync(id, HeartBeatProperty, DateTimeOffset.Now.ToString("O"));
+
 		private async Task UpdateValueAsync (uint id, string key, dynamic value)
 		{
-			var col = new TwinCollection();
-			col[key] = value;
+			var col = new TwinCollection { [key] = value };
 
-			var client = GetDeviceClient(id);
+			var (device, sync) = GetDeviceClient(id);
 
-			lock (client) { client.UpdateReportedPropertiesAsync(col).Wait(); }
+			await sync.WaitAsync().ConfigureAwait(false);
+
+			try {
+				await device.UpdateReportedPropertiesAsync(col).ConfigureAwait(false);
+			} finally { sync.Release(); }
 		}
 
-		public Task SetAsync (uint id, string key, uint value) => UpdateValueAsync(id, key, value);
-		public Task SetAsync (uint id, string key, int value) => UpdateValueAsync(id, key, value);
-		public Task SetAsync (uint id, string key, string value) => UpdateValueAsync(id, key, value);
-		public Task SetAsync (uint id, string key, double value) => UpdateValueAsync(id, key, value);
-		public Task SetAsync (uint id, string key, bool value) => UpdateValueAsync(id, key, value);
+		public virtual Task SetAsync (uint id, string key, uint value) => UpdateValueAsync(id, key, value);
+		public virtual Task SetAsync (uint id, string key, int value) => UpdateValueAsync(id, key, value);
+		public virtual Task SetAsync (uint id, string key, string value) => UpdateValueAsync(id, key, value);
+		public virtual Task SetAsync (uint id, string key, double value) => UpdateValueAsync(id, key, value);
+		public virtual Task SetAsync (uint id, string key, bool value) => UpdateValueAsync(id, key, value);
 
-		public async Task SetAsync (uint id, IReadOnlyDictionary<string, object> values)
+		public virtual async Task SetAsync (uint id, ObjDict values)
 		{
 			var col = new TwinCollection();
 
 			foreach (var kv in values) {
 				switch (kv.Value) {
-					case IReadOnlyDictionary<string, double> hashvalues: {
+					case DoubleDict hashvalues: {
 							if (hashvalues.Count > 0) {
 								var hash = new TwinCollection();
 								foreach (var kv2 in hashvalues) hash[kv2.Key] = kv2.Value;
@@ -217,12 +262,16 @@ namespace iChen.Persistence.Cloud
 				}
 			}
 
-			var client = GetDeviceClient(id);
+			var (device, sync) = GetDeviceClient(id);
 
-			lock (client) { client.UpdateReportedPropertiesAsync(col).Wait(); }
+			await sync.WaitAsync().ConfigureAwait(false);
+
+			try {
+				await device.UpdateReportedPropertiesAsync(col).ConfigureAwait(false);
+			} finally { sync.Release(); }
 		}
 
-		public async Task SetAsync (uint id, string key, IReadOnlyDictionary<string, double> value)
+		public virtual async Task SetAsync (uint id, string key, DoubleDict value)
 		{
 			var root = new TwinCollection();
 
@@ -236,29 +285,44 @@ namespace iChen.Persistence.Cloud
 				root[key] = null;
 			}
 
-			var client = GetDeviceClient(id);
+			var (device, sync) = GetDeviceClient(id);
 
-			lock (client) { client.UpdateReportedPropertiesAsync(root).Wait(); }
+			await sync.WaitAsync().ConfigureAwait(false);
+
+			try {
+				await device.UpdateReportedPropertiesAsync(root).ConfigureAwait(false);
+			} finally { sync.Release(); }
 		}
 
-		public async Task SetAsync (uint id, string key, string field, double value)
+		public virtual async Task SetAsync (uint id, string key, string field, double value)
 		{
 			var root = new TwinCollection() { [key] = new TwinCollection { [field] = value } };
 
-			var client = GetDeviceClient(id);
+			var (device, sync) = GetDeviceClient(id);
 
-			lock (client) { client.UpdateReportedPropertiesAsync(root).Wait(); }
+			await sync.WaitAsync().ConfigureAwait(false);
+
+			try {
+				await device.UpdateReportedPropertiesAsync(root).ConfigureAwait(false);
+			} finally { sync.Release(); }
 		}
 
-		public async Task SendMessageAsync (uint id, string message)
+		public virtual async Task SendMessageAsync (uint id, string message)
 		{
 			if (message == null) throw new ArgumentNullException(nameof(message));
 
 			var msg = new Microsoft.Azure.Devices.Client.Message(Encoding.UTF8.GetBytes(message));
 
-			var client = GetDeviceClient(id);
+			var (device, sync) = GetDeviceClient(id);
 
-			lock (client) { client.SendEventAsync(msg).Wait(); }
+			await sync.WaitAsync().ConfigureAwait(false);
+
+			try {
+				await device.SendEventAsync(msg).ConfigureAwait(false);
+			} finally { sync.Release(); }
 		}
+
+		public IEnumerable<(uint id, string key, string field, object value, DateTimeOffset timestamp)> Dump () =>
+			throw new NotImplementedException();
 	}
 }

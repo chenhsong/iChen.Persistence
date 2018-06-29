@@ -71,16 +71,12 @@ namespace iChen.Persistence.Cloud
 			OnLog?.Invoke("Archive database terminated.");
 		}
 
-		public void Dispose ()
-		{
-			Close();
-		}
+		public void Dispose () => Close();
 
 		/// <remarks>This method is thread-safe.</remarks>
 		public void Enqueue (EntryBase entry)
 		{
 			if (entry == null) throw new ArgumentNullException(nameof(entry));
-
 			m_DataUploadQueue.Enqueue(entry);
 		}
 
@@ -96,7 +92,7 @@ namespace iChen.Persistence.Cloud
 			}
 		}
 
-		public int OutBufferCount { get { return m_DataUploadQueue.Count; } }
+		public int OutBufferCount => m_DataUploadQueue.Count;
 
 		private async Task RefreshAsync ()
 		{

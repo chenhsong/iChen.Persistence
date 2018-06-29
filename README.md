@@ -1,6 +1,6 @@
 # iChen&reg; Server Persistence Library
 
-This library provides persistence (i.e. storage) facilities to the iChen&reg; System.
+This library provides persistence (i.e. storage) facilities to the iChen&reg; System (version 4.1 and up).
 
 It consists of the following assemblies:
 

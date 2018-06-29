@@ -7,7 +7,12 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Config", "Config\Config.csp
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Cloud", "Cloud\Cloud.csproj", "{C341239E-2F6A-4E4E-80BC-A4244536F42B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Analytics", "Analytics\Analytics.csproj", "{A87ADB14-3571-49AA-B872-B5D0AE444952}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Analytics", "Analytics\Analytics.csproj", "{A87ADB14-3571-49AA-B872-B5D0AE444952}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Root", "Root", "{391115F2-B143-491D-9BAA-620DEDFAB43A}"
+	ProjectSection(SolutionItems) = preProject
+		README.md = README.md
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,10 +20,6 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{627996E5-53F5-4B16-B131-E2A556882876}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{627996E5-53F5-4B16-B131-E2A556882876}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{627996E5-53F5-4B16-B131-E2A556882876}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{627996E5-53F5-4B16-B131-E2A556882876}.Release|Any CPU.Build.0 = Release|Any CPU
 		{FDAFE94E-1D4F-4A92-89F5-F80A26BCD202}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{FDAFE94E-1D4F-4A92-89F5-F80A26BCD202}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FDAFE94E-1D4F-4A92-89F5-F80A26BCD202}.Release|Any CPU.ActiveCfg = Release|Any CPU

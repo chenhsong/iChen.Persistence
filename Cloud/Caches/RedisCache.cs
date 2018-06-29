@@ -5,6 +5,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using StackExchange.Redis;
 
+using DoubleDict = System.Collections.Generic.IReadOnlyDictionary<string, double>;
+using ObjDict = System.Collections.Generic.IReadOnlyDictionary<string, object>;
+
 namespace iChen.Persistence.Cloud
 {
 	/// <remarks>This type is thread-safe.</remarks>
@@ -13,6 +16,7 @@ namespace iChen.Persistence.Cloud
 		private const int KeySpace = 1;   // 0 is reserved for Chen Hsong internal
 		private const string DefaultObjectType = nameof(iChen);
 		private const string KeysSetObject = nameof(iChen) + "-Keys";
+		private const string TimeStampObject = nameof(iChen) + "-TimeStamps";
 
 		private const string TrueValue = ".T.";
 		private const string FalseValue = ".F.";
@@ -36,7 +40,7 @@ namespace iChen.Persistence.Cloud
 			m_Database = m_Cache.GetDatabase(KeySpace);
 		}
 
-		public void Dispose ()
+		public virtual void Dispose ()
 		{
 			m_SyncLock.Wait();
 			m_SyncLock.Dispose();
@@ -45,7 +49,7 @@ namespace iChen.Persistence.Cloud
 
 		private string MakeKey (uint id, string field = null) => m_ObjectType + ":" + id + (string.IsNullOrWhiteSpace(field) ? null : ":" + field);
 
-		public async Task<double> GetAsync (uint id, string key, string field)
+		public virtual async Task<double> GetAsync (uint id, string key, string field)
 		{
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentNullException(nameof(key));
 			if (string.IsNullOrWhiteSpace(field)) throw new ArgumentNullException(nameof(field));
@@ -58,16 +62,16 @@ namespace iChen.Persistence.Cloud
 			} finally { m_SyncLock.Release(); }
 		}
 
-		public async Task<T> GetAsync<T> (uint id, string key)
+		public virtual async Task<T> GetAsync<T> (uint id, string key)
 		{
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentNullException(nameof(key));
 
 			await m_SyncLock.WaitAsync().ConfigureAwait(false);
 
-			if (typeof(T) == typeof(IReadOnlyDictionary<string, double>)) {
+			if (typeof(T) == typeof(DoubleDict)) {
 				try {
 					var values = await m_Database.HashGetAllAsync(MakeKey(id, key)).ConfigureAwait(false);
-					return (T) (values.ToDictionary(kv => kv.Name.ToString(), kv => Convert.ToDouble(kv.Value)) as IReadOnlyDictionary<string, double>);
+					return (T) (values.ToDictionary(kv => kv.Name.ToString(), kv => Convert.ToDouble(kv.Value)) as DoubleDict);
 				} finally { m_SyncLock.Release(); }
 			}
 
@@ -87,7 +91,7 @@ namespace iChen.Persistence.Cloud
 			return (T) Convert.ChangeType(value, typeof(T));
 		}
 
-		public async Task<ICollection<string>> GetAllKeys ()
+		public virtual async Task<ICollection<string>> GetAllKeys ()
 		{
 			await m_SyncLock.WaitAsync().ConfigureAwait(false);
 
@@ -96,7 +100,7 @@ namespace iChen.Persistence.Cloud
 			} finally { m_SyncLock.Release(); }
 		}
 
-		public async Task<IReadOnlyDictionary<string, object>> GetAsync (uint id)
+		public virtual async Task<(ObjDict dict, DateTimeOffset timestamp)> GetAsync (uint id)
 		{
 			HashEntry[] values;
 
@@ -104,34 +108,38 @@ namespace iChen.Persistence.Cloud
 
 			try {
 				values = await m_Database.HashGetAllAsync(MakeKey(id)).ConfigureAwait(false);
-			} finally { m_SyncLock.Release(); }
 
-			return values.ToDictionary(entry => (string) entry.Name, entry => {
-				var val = entry.Value;
+				var dict = values.ToDictionary(entry => (string) entry.Name, entry => {
+					var val = entry.Value;
 
-				if (val.IsNull) return (object) null;
+					if (val.IsNull) return (object) null;
 
-				try {
-					return (int) val;
-				} catch {
 					try {
-						return (double) val;
-					} catch (InvalidCastException) {
-						var str = (string) val;
+						return (int) val;
+					} catch {
+						try {
+							return (double) val;
+						} catch (InvalidCastException) {
+							var str = (string) val;
 
-						if (str == TrueValue) return true;
-						if (str == FalseValue) return false;
-						return str;
+							if (str == TrueValue) return true;
+							if (str == FalseValue) return false;
+							return str;
+						}
 					}
-				}
-			});
+				});
+
+				var timestamp = DateTimeOffset.Parse((string) await m_Database.HashGetAsync(TimeStampObject, id.ToString()).ConfigureAwait(false));
+
+				return (dict, timestamp);
+			} finally { m_SyncLock.Release(); }
 		}
 
-		public async Task SetAsync (uint id, IReadOnlyDictionary<string, object> values)
+		public virtual async Task SetAsync (uint id, ObjDict values)
 		{
 			if (values == null) throw new ArgumentNullException(nameof(values));
 
-			var entries = values.Where(kv => !(kv.Value is IReadOnlyDictionary<string, double>)).Select(kv => {
+			var entries = values.Where(kv => !(kv.Value is DoubleDict)).Select(kv => {
 				if (string.IsNullOrWhiteSpace(kv.Key)) throw new ArgumentNullException(nameof(kv.Key));
 
 				switch (kv.Value) {
@@ -149,11 +157,12 @@ namespace iChen.Persistence.Cloud
 				var objId = MakeKey(id);
 				await m_Database.HashSetAsync(objId, entries).ConfigureAwait(false);
 				await m_Database.SetAddAsync(KeysSetObject, objId);
+				await m_Database.HashSetAsync(TimeStampObject, new[] { new HashEntry(id.ToString(), DateTimeOffset.Now.ToString("O")) }).ConfigureAwait(false);
 
 				if (entries.Length < values.Count) {
 					// If there are hashes, set each one
 					foreach (var kv in values) {
-						if (!(kv.Value is IReadOnlyDictionary<string, double> val)) continue;
+						if (!(kv.Value is DoubleDict val)) continue;
 
 						objId = MakeKey(id, kv.Key);
 						await m_Database.HashSetAsync(objId, val.Select(kv2 => new HashEntry(kv2.Key, kv2.Value)).ToArray());
@@ -163,7 +172,7 @@ namespace iChen.Persistence.Cloud
 			} finally { m_SyncLock.Release(); }
 		}
 
-		public async Task SetAsync (uint id, string key, bool value)
+		public virtual async Task SetAsync (uint id, string key, bool value)
 		{
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentNullException(nameof(key));
 
@@ -172,10 +181,11 @@ namespace iChen.Persistence.Cloud
 				var objId = MakeKey(id);
 				await m_Database.HashSetAsync(objId, new[] { new HashEntry(key, value ? TrueValue : FalseValue) }).ConfigureAwait(false);
 				await m_Database.SetAddAsync(KeysSetObject, objId);
+				await m_Database.HashSetAsync(TimeStampObject, new[] { new HashEntry(id.ToString(), DateTimeOffset.Now.ToString("O")) }).ConfigureAwait(false);
 			} finally { m_SyncLock.Release(); }
 		}
 
-		public async Task SetAsync (uint id, string key, string value)
+		public virtual async Task SetAsync (uint id, string key, string value)
 		{
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentNullException(nameof(key));
 			await m_SyncLock.WaitAsync().ConfigureAwait(false);
@@ -183,10 +193,11 @@ namespace iChen.Persistence.Cloud
 				var objId = MakeKey(id);
 				await m_Database.HashSetAsync(objId, new[] { new HashEntry(key, value) }).ConfigureAwait(false);
 				await m_Database.SetAddAsync(KeysSetObject, objId);
+				await m_Database.HashSetAsync(TimeStampObject, new[] { new HashEntry(id.ToString(), DateTimeOffset.Now.ToString("O")) }).ConfigureAwait(false);
 			} finally { m_SyncLock.Release(); }
 		}
 
-		public async Task SetAsync (uint id, string key, int value)
+		public virtual async Task SetAsync (uint id, string key, int value)
 		{
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentNullException(nameof(key));
 			await m_SyncLock.WaitAsync().ConfigureAwait(false);
@@ -194,10 +205,11 @@ namespace iChen.Persistence.Cloud
 				var objId = MakeKey(id);
 				await m_Database.HashSetAsync(objId, new[] { new HashEntry(key, value) }).ConfigureAwait(false);
 				await m_Database.SetAddAsync(KeysSetObject, objId);
+				await m_Database.HashSetAsync(TimeStampObject, new[] { new HashEntry(id.ToString(), DateTimeOffset.Now.ToString("O")) }).ConfigureAwait(false);
 			} finally { m_SyncLock.Release(); }
 		}
 
-		public async Task SetAsync (uint id, string key, uint value)
+		public virtual async Task SetAsync (uint id, string key, uint value)
 		{
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentNullException(nameof(key));
 			await m_SyncLock.WaitAsync().ConfigureAwait(false);
@@ -205,10 +217,11 @@ namespace iChen.Persistence.Cloud
 				var objId = MakeKey(id);
 				await m_Database.HashSetAsync(objId, new[] { new HashEntry(key, value) }).ConfigureAwait(false);
 				await m_Database.SetAddAsync(KeysSetObject, objId);
+				await m_Database.HashSetAsync(TimeStampObject, new[] { new HashEntry(id.ToString(), DateTimeOffset.Now.ToString("O")) }).ConfigureAwait(false);
 			} finally { m_SyncLock.Release(); }
 		}
 
-		public async Task SetAsync (uint id, string key, double value)
+		public virtual async Task SetAsync (uint id, string key, double value)
 		{
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentNullException(nameof(key));
 			await m_SyncLock.WaitAsync().ConfigureAwait(false);
@@ -216,10 +229,11 @@ namespace iChen.Persistence.Cloud
 				var objId = MakeKey(id);
 				await m_Database.HashSetAsync(objId, new[] { new HashEntry(key, value) }).ConfigureAwait(false);
 				await m_Database.SetAddAsync(KeysSetObject, objId);
+				await m_Database.HashSetAsync(TimeStampObject, new[] { new HashEntry(id.ToString(), DateTimeOffset.Now.ToString("O")) }).ConfigureAwait(false);
 			} finally { m_SyncLock.Release(); }
 		}
 
-		public async Task SetAsync (uint id, string key, IReadOnlyDictionary<string, double> value)
+		public virtual async Task SetAsync (uint id, string key, DoubleDict value)
 		{
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentNullException(nameof(key));
 			if (value == null) throw new ArgumentNullException(nameof(value));
@@ -228,10 +242,11 @@ namespace iChen.Persistence.Cloud
 				var objId = MakeKey(id, key);
 				await m_Database.HashSetAsync(objId, value.Select(kv => new HashEntry(kv.Key, kv.Value)).ToArray()).ConfigureAwait(false);
 				await m_Database.SetAddAsync(KeysSetObject, objId);
+				await m_Database.HashSetAsync(TimeStampObject, new[] { new HashEntry(id.ToString(), DateTimeOffset.Now.ToString("O")) }).ConfigureAwait(false);
 			} finally { m_SyncLock.Release(); }
 		}
 
-		public async Task SetAsync (uint id, string key, string field, double value)
+		public virtual async Task SetAsync (uint id, string key, string field, double value)
 		{
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentNullException(nameof(key));
 			if (string.IsNullOrWhiteSpace(field)) throw new ArgumentNullException(nameof(field));
@@ -239,10 +254,11 @@ namespace iChen.Persistence.Cloud
 			try {
 				var objId = MakeKey(id, key);
 				await m_Database.HashSetAsync(objId, field, value).ConfigureAwait(false);
+				await m_Database.HashSetAsync(TimeStampObject, new[] { new HashEntry(id.ToString(), DateTimeOffset.Now.ToString("O")) }).ConfigureAwait(false);
 			} finally { m_SyncLock.Release(); }
 		}
 
-		public async Task<bool> HasAsync (uint id, string key)
+		public virtual async Task<bool> HasAsync (uint id, string key)
 		{
 			await m_SyncLock.WaitAsync().ConfigureAwait(false);
 
@@ -250,5 +266,27 @@ namespace iChen.Persistence.Cloud
 				return await m_Database.HashExistsAsync(MakeKey(id), key).ConfigureAwait(false);
 			} finally { m_SyncLock.Release(); }
 		}
+
+		public virtual async Task<DateTimeOffset> GetTimeStampAsync (uint id)
+		{
+			await m_SyncLock.WaitAsync().ConfigureAwait(false);
+
+			try {
+				if (!await m_Database.HashExistsAsync(TimeStampObject, id.ToString()).ConfigureAwait(false)) return default;
+				return DateTimeOffset.Parse((string) await m_Database.HashGetAsync(TimeStampObject, id.ToString()).ConfigureAwait(false));
+			} finally { m_SyncLock.Release(); }
+		}
+
+		public virtual async Task MarkActiveAsync (uint id)
+		{
+			await m_SyncLock.WaitAsync().ConfigureAwait(false);
+
+			try {
+				await m_Database.HashSetAsync(TimeStampObject, new[] { new HashEntry(id.ToString(), DateTimeOffset.Now.ToString("O")) }).ConfigureAwait(false);
+			} finally { m_SyncLock.Release(); }
+		}
+
+		public IEnumerable<(uint id, string key, string field, object value, DateTimeOffset timestamp)> Dump () =>
+			throw new NotImplementedException();
 	}
 }

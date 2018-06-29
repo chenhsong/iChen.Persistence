@@ -19,8 +19,8 @@ namespace iChen.Persistence.Server
 			entity.ToTable("TextMaps", m_Schema);
 			entity.HasKey(x => x.ID);
 
-			entity.Property(x => x.ID).HasColumnName("ID").IsRequired().HasColumnType("int").ValueGeneratedOnAdd();
-			entity.Property(x => x.Text).HasColumnName("Text").IsRequired().HasColumnType("nvarchar(255)");
+			entity.Property(x => x.ID).HasColumnName("ID").IsRequired();//.HasColumnType("int").ValueGeneratedOnAdd();
+			entity.Property(x => x.Text).HasColumnName("Text").IsRequired();//.HasColumnType("nvarchar(255)");
 		}
 	}
 }

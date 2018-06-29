@@ -19,10 +19,10 @@ namespace iChen.Persistence.Server
 			entity.ToTable("TerminalConfigs", m_Schema);
 			entity.HasKey(x => x.OrgId);
 
-			entity.Property(x => x.OrgId).HasColumnName("OrgId").IsRequired().HasColumnType("nvarchar(100)");
+			entity.Property(x => x.OrgId).HasColumnName("OrgId").IsRequired();//.HasColumnType("nvarchar(100)");
 			entity.Property(x => x.Text).HasColumnName("Text").IsRequired();
-			entity.Property(x => x.Created).HasColumnName("Created").IsRequired().HasColumnType("datetime");
-			entity.Property(x => x.Modified).HasColumnName("Modified").HasColumnType("datetime");
+			entity.Property(x => x.Created).HasColumnName("Created").IsRequired();//.HasColumnType("datetime");
+			entity.Property(x => x.Modified).HasColumnName("Modified");//.HasColumnType("datetime");
 		}
 	}
 }

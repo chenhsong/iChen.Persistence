@@ -94,10 +94,7 @@ namespace iChen.Persistence.Cloud
 			OnLog?.Invoke("Azure storage terminated.");
 		}
 
-		public void Dispose ()
-		{
-			Close();
-		}
+		public void Dispose () => Close();
 
 		/// <remarks>This method is thread-safe.</remarks>
 		public void Enqueue (EntryBase entry)
@@ -148,7 +145,7 @@ namespace iChen.Persistence.Cloud
 			}
 		}
 
-		public int OutBufferCount { get { return m_CycleDataQueue.Count + m_MoldDataQueue.Count + m_AlarmsQueue.Count + m_AuditTrailQueue.Count + m_EventsQueue.Count; } }
+		public int OutBufferCount => m_CycleDataQueue.Count + m_MoldDataQueue.Count + m_AlarmsQueue.Count + m_AuditTrailQueue.Count + m_EventsQueue.Count;
 
 		private async Task RefreshAsync ()
 		{

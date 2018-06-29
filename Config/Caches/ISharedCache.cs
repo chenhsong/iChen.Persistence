@@ -8,7 +8,11 @@ namespace iChen.Persistence
 	{
 		Task<bool> HasAsync (uint id, string key);
 
-		Task<IReadOnlyDictionary<string, object>> GetAsync (uint id);
+		Task<DateTimeOffset> GetTimeStampAsync (uint id);
+
+		Task MarkActiveAsync (uint id);
+
+		Task<(IReadOnlyDictionary<string, object> dict, DateTimeOffset timestamp)> GetAsync (uint id);
 
 		Task<T> GetAsync<T> (uint id, string key);
 
@@ -29,5 +33,7 @@ namespace iChen.Persistence
 		Task SetAsync (uint id, string key, IReadOnlyDictionary<string, double> value);
 
 		Task SetAsync (uint id, string key, string field, double value);
+
+		IEnumerable<(uint id, string key, string field, object value, DateTimeOffset timestamp)> Dump ();
 	}
 }
