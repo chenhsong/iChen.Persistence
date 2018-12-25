@@ -1,4 +1,5 @@
-# iChen&reg; Server Analytics Engine
+iChen® Server Analytics Engine
+=============================
 
 Framework: .NET Standard 2.0  
 Dependencies: [`iChen.OpenProtocol.dll`](https://github.com/chenhsong/OpenProtocol)  
