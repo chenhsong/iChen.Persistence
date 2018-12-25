@@ -9,8 +9,8 @@ namespace iChen.Persistence.Cloud
 {
 	public partial class OdbcStore : IDisposable
 	{
-		public const int RefreshInterval = 500;
-		public const int ErrorRefreshInterval = 15000;  // Retry every 15 seconds
+		public const uint RefreshInterval = 500;
+		public const uint ErrorRefreshInterval = 15000;  // Retry every 15 seconds
 		public const uint MaxBufferSize = 100000;
 
 		private readonly uint m_MaxMessages = MaxBufferSize;
@@ -19,7 +19,7 @@ namespace iChen.Persistence.Cloud
 		private readonly Func<DbConnection> connectionFactory = null;
 		private readonly Func<string, DbType, int, object, DbParameter> createSqlParameter = null;
 
-		private Task m_RefreshLoop = null;
+		private readonly Task m_RefreshLoop = null;
 		private bool m_IsRunning = false;
 		private DateTime m_NextTryTime = DateTime.MinValue;
 
@@ -30,40 +30,46 @@ namespace iChen.Persistence.Cloud
 		public event Action<EntryBase, Exception, string> OnUploadError;
 		public event Action<Exception, string> OnError;
 
-		public OdbcStore (Func<DbConnection> connectionFactory, Func<string, DbType, int, object, DbParameter> createSqlParameter, uint maxbuffer = MaxBufferSize)
+		public OdbcStore (Func<DbConnection> connectionFactory, Func<string, DbType, int, object, DbParameter> createSqlParameter, uint maxbuffer = MaxBufferSize, Action<string> onDebug = null)
 		{
-			if (connectionFactory == null) throw new ArgumentNullException(nameof(connectionFactory));
-			if (createSqlParameter == null) throw new ArgumentNullException(nameof(createSqlParameter));
+			this.connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
+			this.createSqlParameter = createSqlParameter ?? throw new ArgumentNullException(nameof(createSqlParameter));
 
-			this.connectionFactory = connectionFactory;
-			this.createSqlParameter = createSqlParameter;
 			m_MaxMessages = maxbuffer;
+			OnDebug += onDebug;
 
 			OnDebug?.Invoke("Archive database started.");
 
 			m_IsRunning = true;
 
-			m_RefreshLoop = Task.Run(async () => {
-				OnDebug?.Invoke("Archive database refresh loop started.");
+			m_RefreshLoop = RunRefreshLoopAsync();
+		}
 
-				while (true) {
-					if (m_NextTryTime < DateTime.Now) {
-						m_NextTryTime = DateTime.MinValue;
+		private async Task RunRefreshLoopAsync ()
+		{
+			OnDebug?.Invoke("Archive database refresh loop started.");
 
+			while (true) {
+				if (m_NextTryTime < DateTime.Now) {
+					m_NextTryTime = DateTime.MinValue;
+
+					try {
 						await RefreshAsync();
+					} catch (Exception ex) {
+						OnError?.Invoke(ex, "Error uploading to archive database.");
 					}
-
-					if (m_IsRunning) await Task.Delay(RefreshInterval).ConfigureAwait(false);
-					if (!m_IsRunning && m_DataUploadQueue.Count <= 0) break;
 				}
 
-				OnDebug?.Invoke("Archive database refresh loop ended.");
-			});
+				if (m_IsRunning) await Task.Delay((int) RefreshInterval).ConfigureAwait(false);
+				if (!m_IsRunning && m_DataUploadQueue.Count <= 0) break;
+			}
+
+			OnDebug?.Invoke("Archive database refresh loop ended.");
 		}
 
 		public void Close ()
 		{
-			OnLog?.Invoke("Archive database terminating...");
+			OnDebug?.Invoke("Archive database terminating...");
 
 			m_IsRunning = false;
 			m_RefreshLoop.Wait(15000);

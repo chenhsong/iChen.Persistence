@@ -50,7 +50,7 @@ namespace iChen.Analytics
 			}
 		}
 
-		public EventX () : base("Dummy", "Dummy")
+		public EventX () : base(null, "Dummy", "Dummy")
 		{
 			this.Time = DateTimeOffset.MaxValue;
 		}

@@ -3,8 +3,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using ObjDictX = System.Collections.Concurrent.ConcurrentDictionary<string, object>;
 using DoubleDictX = System.Collections.Concurrent.ConcurrentDictionary<string, double>;
+using ObjDictX = System.Collections.Concurrent.ConcurrentDictionary<string, object>;
 
 namespace iChen.Persistence
 {
@@ -18,18 +18,18 @@ namespace iChen.Persistence
 
 		public virtual void Dispose () { }
 
-		private ObjDictX GetPartition (uint id) => m_Cache.TryGetValue(id, out var entry) ?
-			entry.dict :
-			throw new ArgumentOutOfRangeException($"Invalid id: {id}");
+		private ObjDictX GetPartition (uint id) => m_Cache.TryGetValue(id, out var entry)
+			? entry.dict
+			: throw new ArgumentOutOfRangeException($"Invalid id: {id}");
 
 		public virtual void Clear () => m_Cache.Clear();
 
 		public virtual async Task<(IReadOnlyDictionary<string, object> dict, DateTimeOffset timestamp)> GetAsync (uint id) =>
-			m_Cache.TryGetValue(id, out var entry) ?
-				await Task.FromResult((entry.dict.ToDictionary(kv => kv.Key, kv => (kv.Value is DoubleDictX ddict) ?
-					new Dictionary<string, double>(ddict, StringComparer.InvariantCultureIgnoreCase) :
-					kv.Value, StringComparer.InvariantCultureIgnoreCase), entry.timestamp)) :
-				throw new ArgumentOutOfRangeException($"Invalid id: {id}");
+			m_Cache.TryGetValue(id, out var entry)
+				? await Task.FromResult((entry.dict.ToDictionary(kv => kv.Key, kv => (kv.Value is DoubleDictX ddict)
+						? new Dictionary<string, double>(ddict, StringComparer.InvariantCultureIgnoreCase)
+						: kv.Value, StringComparer.InvariantCultureIgnoreCase), entry.timestamp))
+				: throw new ArgumentOutOfRangeException($"Invalid id: {id}");
 
 		public virtual async Task<double> GetAsync (uint id, string key, string field)
 		{
@@ -52,9 +52,9 @@ namespace iChen.Persistence
 			if (!GetPartition(id).TryGetValue(key, out var result)) throw new ArgumentOutOfRangeException($"Invalid key: {id}:{key}");
 
 			if (typeof(T) == typeof(IReadOnlyDictionary<string, double>))
-				return (result is DoubleDictX ddict) ?
-					(T) (IReadOnlyDictionary<string, double>) new Dictionary<string, double>(ddict, StringComparer.InvariantCultureIgnoreCase) :
-					throw new InvalidCastException("{id}:{key} is not a hash.");
+				return (result is DoubleDictX ddict)
+					? (T) (IReadOnlyDictionary<string, double>) new Dictionary<string, double>(ddict, StringComparer.InvariantCultureIgnoreCase)
+					: throw new InvalidCastException("{id}:{key} is not a hash.");
 
 			return await Task.FromResult((T) Convert.ChangeType(result, typeof(T)));
 		}
@@ -118,29 +118,36 @@ namespace iChen.Persistence
 
 		public virtual Task SetAsync (uint id, string key, uint value) => SetValueAsync(id, key, value);
 
-		public virtual Task SetAsync (uint id, string key, IReadOnlyDictionary<string, double> values) =>
-			SetValueAsync(id, key, new DoubleDictX(values, StringComparer.InvariantCultureIgnoreCase));    // Copy the dictionary
+		public virtual Task SetAsync (uint id, string key, IReadOnlyDictionary<string, double> values)
+			=> SetValueAsync(id, key, new DoubleDictX(values, StringComparer.InvariantCultureIgnoreCase));    // Copy the dictionary
 
-		public virtual Task SetAsync (uint id, string key, string field, double value)
+		public virtual async Task UpdateAsync (uint id, string key, IReadOnlyDictionary<string, double> values)
+		{
+			foreach (var kv in values) {
+				await SetAsync(id, key, kv.Key, kv.Value);
+			}
+		}
+
+		public virtual async Task SetAsync (uint id, string key, string field, double value)
 		{
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentNullException(nameof(key));
 			if (string.IsNullOrWhiteSpace(field)) throw new ArgumentNullException(nameof(field));
 
-			if (!GetPartition(id).TryGetValue(key, out var result))
-				return SetValueAsync(id, key, new Dictionary<string, double>() { [field] = value });
+			if (!GetPartition(id).TryGetValue(key, out var result)) {
+				await SetValueAsync(id, key, new Dictionary<string, double>() { [field] = value });
+				return;
+			}
 
 			if (!(result is DoubleDictX dict)) throw new ArgumentOutOfRangeException($"Key {id}:{key} is not a hash.");
 
 			dict[field] = value;
-
-			return Task.CompletedTask;
 		}
 
-		public virtual Task<bool> HasAsync (uint id, string key) =>
-			Task.FromResult(m_Cache.TryGetValue(id, out var entry) ? entry.dict.ContainsKey(key) : false);
+		public virtual Task<bool> HasAsync (uint id, string key)
+			=> Task.FromResult(m_Cache.TryGetValue(id, out var entry) ? entry.dict.ContainsKey(key) : false);
 
-		public virtual Task<DateTimeOffset> GetTimeStampAsync (uint id) =>
-			Task.FromResult(m_Cache.TryGetValue(id, out var entry) ? entry.timestamp : default);
+		public virtual Task<DateTimeOffset> GetTimeStampAsync (uint id)
+			=> Task.FromResult(m_Cache.TryGetValue(id, out var entry) ? entry.timestamp : default);
 
 		public virtual Task MarkActiveAsync (uint id)
 		{

@@ -15,9 +15,6 @@ namespace iChen.Persistence.Server
 			m_Schema = schema?.Trim();
 		}
 
-		public static void SetVersion (ushort version)
-		{
-			m_Version = version;
-		}
+		public static void SetVersion (ushort version) => m_Version = version;
 	}
 }

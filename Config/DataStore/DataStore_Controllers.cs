@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using iChen.OpenProtocol;
 using Microsoft.EntityFrameworkCore;
 
 namespace iChen.Persistence.Server
@@ -40,11 +39,9 @@ namespace iChen.Persistence.Server
 			if (orgId != null && string.IsNullOrWhiteSpace(orgId)) throw new ArgumentNullException(nameof(orgId));
 
 			using (var db = new ConfigDB(m_Schema, m_Version)) {
-				if (orgId == null) {
-					return await db.Controllers.AsNoTracking().ToListAsync().ConfigureAwait(false);
-				} else {
-					return await db.Controllers.AsNoTracking().Where(c => c.OrgId.Equals(orgId, StringComparison.OrdinalIgnoreCase)).ToListAsync().ConfigureAwait(false);
-				}
+				return (orgId == null)
+					? await db.Controllers.AsNoTracking().ToListAsync().ConfigureAwait(false)
+					: await db.Controllers.AsNoTracking().Where(c => c.OrgId.Equals(orgId, StringComparison.OrdinalIgnoreCase)).ToListAsync().ConfigureAwait(false);
 			}
 		}
 
@@ -56,9 +53,9 @@ namespace iChen.Persistence.Server
 			}
 		}
 
-		public static string ProcessIPAddress (string ip)
+		private static string ProcessIPAddress (string ip)
 		{
-			if (string.IsNullOrWhiteSpace(ip)) throw new ArgumentNullException(nameof(ip));
+			if (string.IsNullOrWhiteSpace(ip)) return null;
 
 			ip = ip.Trim();
 
@@ -80,32 +77,18 @@ namespace iChen.Persistence.Server
 		}
 
 		/// <remarks>This method is thread-safe.</remarks>
-		public static async Task AddControllerAsync (int ID, string orgId, string name, ControllerTypes type, string version, string model, string IPAddress, bool enabled = true, double? geo_latitude = null, double? geo_longitude = null)
+		public static async Task AddControllerAsync (int ID, string orgId, string name, int type, string version, string model, string IPAddress, bool enabled = true, double? geo_latitude = null, double? geo_longitude = null)
 		{
-			if (string.IsNullOrWhiteSpace(orgId)) throw new ArgumentNullException(nameof(orgId));
-			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
-			if (type == ControllerTypes.Unknown) throw new ArgumentOutOfRangeException(nameof(type));
-			if (string.IsNullOrWhiteSpace(version)) throw new ArgumentNullException(nameof(version));
-			if (string.IsNullOrWhiteSpace(model)) throw new ArgumentNullException(nameof(model));
-			if (string.IsNullOrWhiteSpace(IPAddress)) throw new ArgumentNullException(nameof(IPAddress));
-
-			orgId = orgId.Trim();
-			name = name.Trim();
-			version = version.Trim();
-			model = model.Trim();
-			IPAddress = ProcessIPAddress(IPAddress);
-			if (IPAddress == null) throw new ArgumentOutOfRangeException(nameof(IPAddress));
-
 			var ctrl = new Controller()
 			{
 				ID = ID,
-				OrgId = orgId,
+				OrgId = !string.IsNullOrWhiteSpace(orgId) ? orgId.Trim() : throw new ArgumentNullException(nameof(orgId)),
 				IsEnabled = enabled,
-				Name = name,
-				Type = type,
-				Version = version,
-				Model = model,
-				IP = IPAddress,
+				Name = !string.IsNullOrWhiteSpace(name) ? name.Trim() : throw new ArgumentNullException(nameof(name)),
+				Type = (type > 0) ? type : throw new ArgumentOutOfRangeException(nameof(type)),
+				Version = !string.IsNullOrWhiteSpace(version) ? version.Trim() : throw new ArgumentNullException(nameof(version)),
+				Model = !string.IsNullOrWhiteSpace(model) ? model.Trim() : throw new ArgumentNullException(nameof(model)),
+				IP = ProcessIPAddress(IPAddress) ?? throw new ArgumentOutOfRangeException(nameof(IPAddress)),
 				GeoLatitude = geo_latitude,
 				GeoLongitude = geo_longitude
 			};
@@ -120,30 +103,18 @@ namespace iChen.Persistence.Server
 		}
 
 		/// <remarks>This method is thread-safe.</remarks>
-		public static async Task UpdateControllerAsync (int ID, bool enabled, string name, ControllerTypes type, string version, string model, string IPAddress, double? geo_latitude, double? geo_longitude)
+		public static async Task UpdateControllerAsync (int ID, bool enabled, string name, int type, string version, string model, string IPAddress, double? geo_latitude, double? geo_longitude)
 		{
-			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
-			if (type == ControllerTypes.Unknown) throw new ArgumentOutOfRangeException(nameof(type));
-			if (string.IsNullOrWhiteSpace(version)) throw new ArgumentNullException(nameof(version));
-			if (string.IsNullOrWhiteSpace(model)) throw new ArgumentNullException(nameof(model));
-			if (string.IsNullOrWhiteSpace(IPAddress)) throw new ArgumentNullException(nameof(IPAddress));
-
-			name = name.Trim();
-			version = version.Trim();
-			model = model.Trim();
-			IPAddress = ProcessIPAddress(IPAddress);
-			if (IPAddress == null) throw new ArgumentOutOfRangeException(nameof(IPAddress));
-
 			using (var db = new ConfigDB(m_Schema, m_Version)) {
 				var ctrl = await db.Controllers.FirstOrDefaultAsync(c => c.ID == ID).ConfigureAwait(false);
 				if (ctrl == null) throw new ArgumentOutOfRangeException(nameof(ID));
 
 				ctrl.IsEnabled = enabled;
-				ctrl.Name = name;
-				ctrl.Type = type;
-				ctrl.Version = version;
-				ctrl.Model = model;
-				ctrl.IP = IPAddress;
+				ctrl.Name = !string.IsNullOrWhiteSpace(name) ? name.Trim() : throw new ArgumentNullException(nameof(name));
+				ctrl.Type = (type >= 0) ? type : throw new ArgumentOutOfRangeException(nameof(type));
+				ctrl.Version = !string.IsNullOrWhiteSpace(version) ? version.Trim() : throw new ArgumentNullException(nameof(version));
+				ctrl.Model = !string.IsNullOrWhiteSpace(model) ? model.Trim() : throw new ArgumentNullException(nameof(model));
+				ctrl.IP = ProcessIPAddress(IPAddress) ?? throw new ArgumentOutOfRangeException(nameof(IPAddress));
 				ctrl.GeoLatitude = geo_latitude;
 				ctrl.GeoLongitude = geo_longitude;
 				ctrl.Modified = DateTime.Now;

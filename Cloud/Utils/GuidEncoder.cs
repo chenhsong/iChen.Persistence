@@ -6,7 +6,7 @@ namespace iChen.Persistence.Cloud
 {
 	internal static class GuidEncoder
 	{
-		private static Ascii85 Ascii85Encoder = new Ascii85();
+		private static readonly Ascii85 Ascii85Encoder = new Ascii85();
 
 		public static string Encode (Guid guid)
 		{
@@ -66,7 +66,7 @@ namespace iChen.Persistence.Cloud
 		private uint _tuple = 0;
 		private int _linePos = 0;
 
-		private uint[] pow85 = { 85 * 85 * 85 * 85, 85 * 85 * 85, 85 * 85, 85, 1 };
+		private readonly uint[] pow85 = { 85 * 85 * 85 * 85, 85 * 85 * 85, 85 * 85, 85, 1 };
 
 		/// <summary>
 		/// Decodes an ASCII85 encoded string into the original binary data
@@ -76,19 +76,13 @@ namespace iChen.Persistence.Cloud
 		public byte[] Decode (string s)
 		{
 			if (EnforceMarks) {
-				if (!s.StartsWith(PrefixMark) | !s.EndsWith(SuffixMark)) {
-					throw new Exception("ASCII85 encoded data should begin with '" + PrefixMark +
-						"' and end with '" + SuffixMark + "'");
-				}
+				if (!s.StartsWith(PrefixMark) | !s.EndsWith(SuffixMark))
+					throw new Exception($"ASCII85 encoded data should begin with '{PrefixMark}' and end with '{SuffixMark}'");
 			}
 
 			// strip prefix and suffix if present
-			if (s.StartsWith(PrefixMark)) {
-				s = s.Substring(PrefixMark.Length);
-			}
-			if (s.EndsWith(SuffixMark)) {
-				s = s.Substring(0, s.Length - SuffixMark.Length);
-			}
+			if (s.StartsWith(PrefixMark)) s = s.Substring(PrefixMark.Length);
+			if (s.EndsWith(SuffixMark)) s = s.Substring(0, s.Length - SuffixMark.Length);
 
 			MemoryStream ms = new MemoryStream();
 			int count = 0;
@@ -97,9 +91,8 @@ namespace iChen.Persistence.Cloud
 			foreach (char c in s) {
 				switch (c) {
 					case 'z':
-						if (count != 0) {
-							throw new Exception("The character 'z' is invalid inside an ASCII85 block.");
-						}
+						if (count != 0) throw new Exception("The character 'z' is invalid inside an ASCII85 block.");
+
 						_decodedBlock[0] = 0;
 						_decodedBlock[1] = 0;
 						_decodedBlock[2] = 0;
@@ -118,9 +111,7 @@ namespace iChen.Persistence.Cloud
 						break;
 
 					default:
-						if (c < '!' || c > 'u') {
-							throw new Exception("Bad character '" + c + "' found. ASCII85 only allows characters '!' to 'u'.");
-						}
+						if (c < '!' || c > 'u') throw new Exception($"Bad character '{c}' found. ASCII85 only allows characters '!' to 'u'.");
 						processChar = true;
 						break;
 				}
@@ -128,6 +119,7 @@ namespace iChen.Persistence.Cloud
 				if (processChar) {
 					_tuple += ((uint) (c - _asciiOffset) * pow85[count]);
 					count++;
+
 					if (count == _encodedBlock.Length) {
 						DecodeBlock();
 						ms.Write(_decodedBlock, 0, _decodedBlock.Length);
@@ -139,15 +131,13 @@ namespace iChen.Persistence.Cloud
 
 			// if we have some bytes left over at the end..
 			if (count != 0) {
-				if (count == 1) {
-					throw new Exception("The last block of ASCII85 data cannot be a single byte.");
-				}
+				if (count == 1) throw new Exception("The last block of ASCII85 data cannot be a single byte.");
+
 				count--;
 				_tuple += pow85[count];
 				DecodeBlock(count);
-				for (int i = 0; i < count; i++) {
-					ms.WriteByte(_decodedBlock[i]);
-				}
+
+				for (int i = 0; i < count; i++) ms.WriteByte(_decodedBlock[i]);
 			}
 
 			return ms.ToArray();
@@ -160,15 +150,14 @@ namespace iChen.Persistence.Cloud
 		/// <returns>ASCII85 encoded string</returns>
 		public string Encode (byte[] ba)
 		{
-			StringBuilder sb = new StringBuilder((int) (ba.Length * (_encodedBlock.Length / _decodedBlock.Length)));
+			StringBuilder sb = new StringBuilder(ba.Length * (_encodedBlock.Length / _decodedBlock.Length));
 			_linePos = 0;
 
-			if (EnforceMarks) {
-				AppendString(sb, PrefixMark);
-			}
+			if (EnforceMarks) AppendString(sb, PrefixMark);
 
 			int count = 0;
 			_tuple = 0;
+
 			foreach (byte b in ba) {
 				if (count >= _decodedBlock.Length - 1) {
 					_tuple |= b;
@@ -186,20 +175,13 @@ namespace iChen.Persistence.Cloud
 			}
 
 			// if we have some bytes left over at the end..
-			if (count > 0) {
-				EncodeBlock(count + 1, sb);
-			}
+			if (count > 0) EncodeBlock(count + 1, sb);
+			if (EnforceMarks) AppendString(sb, SuffixMark);
 
-			if (EnforceMarks) {
-				AppendString(sb, SuffixMark);
-			}
 			return sb.ToString();
 		}
 
-		private void EncodeBlock (StringBuilder sb)
-		{
-			EncodeBlock(_encodedBlock.Length, sb);
-		}
+		private void EncodeBlock (StringBuilder sb) => EncodeBlock(_encodedBlock.Length, sb);
 
 		private void EncodeBlock (int count, StringBuilder sb)
 		{
@@ -214,16 +196,11 @@ namespace iChen.Persistence.Cloud
 			}
 		}
 
-		private void DecodeBlock ()
-		{
-			DecodeBlock(_decodedBlock.Length);
-		}
+		private void DecodeBlock () => DecodeBlock(_decodedBlock.Length);
 
 		private void DecodeBlock (int bytes)
 		{
-			for (int i = 0; i < bytes; i++) {
-				_decodedBlock[i] = (byte) (_tuple >> 24 - (i * 8));
-			}
+			for (int i = 0; i < bytes; i++) _decodedBlock[i] = (byte) (_tuple >> 24 - (i * 8));
 		}
 
 		private void AppendString (StringBuilder sb, string s)
@@ -241,6 +218,7 @@ namespace iChen.Persistence.Cloud
 		{
 			sb.Append(c);
 			_linePos++;
+
 			if (LineLength > 0 && (_linePos >= LineLength)) {
 				_linePos = 0;
 				sb.Append('\n');

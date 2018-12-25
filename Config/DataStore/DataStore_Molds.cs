@@ -59,16 +59,11 @@ namespace iChen.Persistence.Server
 		/// <remarks>This method is thread-safe.</remarks>
 		public static async Task<int> AddMoldAsync (string name, int? controller, bool enabled = true, IList<ushort> data = null)
 		{
-			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
-			if (controller.HasValue && controller.Value <= 0) throw new ArgumentOutOfRangeException(nameof(controller));
-
-			name = name.Trim();
-
 			var mold = new Mold()
 			{
 				IsEnabled = enabled,
-				Name = name,
-				ControllerId = controller,
+				Name = !string.IsNullOrWhiteSpace(name) ? name.Trim() : throw new ArgumentNullException(nameof(name)),
+				ControllerId = (!controller.HasValue || controller.Value > 0) ? controller : throw new ArgumentOutOfRangeException(nameof(controller)),
 				Guid = Guid.NewGuid()
 			};
 
@@ -101,16 +96,11 @@ namespace iChen.Persistence.Server
 		/// <remarks>This method is thread-safe.</remarks>
 		public static async Task<int> AddMoldAsync (string name, int? controller, bool enabled = true, IReadOnlyDictionary<ushort, ushort> data = null)
 		{
-			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
-			if (controller.HasValue && controller.Value <= 0) throw new ArgumentOutOfRangeException(nameof(controller));
-
-			name = name.Trim();
-
 			var mold = new Mold()
 			{
 				IsEnabled = enabled,
-				Name = name,
-				ControllerId = controller,
+				Name = !string.IsNullOrWhiteSpace(name) ? name.Trim() : throw new ArgumentNullException(nameof(name)),
+				ControllerId = (!controller.HasValue || controller.Value > 0) ? controller : throw new ArgumentOutOfRangeException(nameof(controller)),
 				Guid = Guid.NewGuid()
 			};
 
@@ -138,18 +128,13 @@ namespace iChen.Persistence.Server
 		/// <remarks>This method is thread-safe.</remarks>
 		public static async Task UpdateMoldAsync (int ID, bool enabled, string name, int? controller)
 		{
-			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
-			if (controller.HasValue && controller.Value <= 0) throw new ArgumentOutOfRangeException(nameof(controller));
-
-			name = name.Trim();
-
 			using (var db = new ConfigDB(m_Schema)) {
 				var mold = await db.Molds.FirstOrDefaultAsync(m => m.ID == ID).ConfigureAwait(false);
 				if (mold == null) throw new ArgumentOutOfRangeException(nameof(ID));
 
 				mold.IsEnabled = enabled;
-				mold.Name = name;
-				mold.ControllerId = controller;
+				mold.Name = !string.IsNullOrWhiteSpace(name) ? name.Trim() : throw new ArgumentNullException(nameof(name));
+				mold.ControllerId = (!controller.HasValue || controller.Value > 0) ? controller : throw new ArgumentOutOfRangeException(nameof(controller));
 				mold.Modified = DateTime.Now;
 
 				await db.SaveChangesAsync().ConfigureAwait(false);

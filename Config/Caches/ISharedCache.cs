@@ -34,6 +34,8 @@ namespace iChen.Persistence
 
 		Task SetAsync (uint id, string key, string field, double value);
 
+		Task UpdateAsync (uint id, string key, IReadOnlyDictionary<string, double> value);
+
 		IEnumerable<(uint id, string key, string field, object value, DateTimeOffset timestamp)> Dump ();
 	}
 }

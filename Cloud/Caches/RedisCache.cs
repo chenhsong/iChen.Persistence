@@ -26,9 +26,7 @@ namespace iChen.Persistence.Cloud
 		private readonly ConnectionMultiplexer m_Cache = null;
 		private readonly IDatabase m_Database = null;
 
-		public RedisCache (string connection) : this(DefaultObjectType, connection)
-		{
-		}
+		public RedisCache (string connection) : this(DefaultObjectType, connection) { }
 
 		public RedisCache (string objType, string connection)
 		{
@@ -129,7 +127,7 @@ namespace iChen.Persistence.Cloud
 					}
 				});
 
-				var timestamp = DateTimeOffset.Parse((string) await m_Database.HashGetAsync(TimeStampObject, id.ToString()).ConfigureAwait(false));
+				var timestamp = DateTimeOffset.Parse(await m_Database.HashGetAsync(TimeStampObject, id.ToString()).ConfigureAwait(false));
 
 				return (dict, timestamp);
 			} finally { m_SyncLock.Release(); }
@@ -233,13 +231,22 @@ namespace iChen.Persistence.Cloud
 			} finally { m_SyncLock.Release(); }
 		}
 
-		public virtual async Task SetAsync (uint id, string key, DoubleDict value)
+		public virtual Task SetAsync (uint id, string key, DoubleDict value)
+			=> InternalSetAsync(id, key, value, false);
+
+		public virtual Task UpdateAsync (uint id, string key, DoubleDict value)
+			=> InternalSetAsync(id, key, value, true);
+
+		protected virtual async Task InternalSetAsync (uint id, string key, DoubleDict value, bool update)
 		{
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentNullException(nameof(key));
 			if (value == null) throw new ArgumentNullException(nameof(value));
 			await m_SyncLock.WaitAsync().ConfigureAwait(false);
 			try {
 				var objId = MakeKey(id, key);
+
+				if (!update) await m_Database.KeyDeleteAsync(objId);
+
 				await m_Database.HashSetAsync(objId, value.Select(kv => new HashEntry(kv.Key, kv.Value)).ToArray()).ConfigureAwait(false);
 				await m_Database.SetAddAsync(KeysSetObject, objId);
 				await m_Database.HashSetAsync(TimeStampObject, new[] { new HashEntry(id.ToString(), DateTimeOffset.Now.ToString("O")) }).ConfigureAwait(false);
@@ -273,7 +280,7 @@ namespace iChen.Persistence.Cloud
 
 			try {
 				if (!await m_Database.HashExistsAsync(TimeStampObject, id.ToString()).ConfigureAwait(false)) return default;
-				return DateTimeOffset.Parse((string) await m_Database.HashGetAsync(TimeStampObject, id.ToString()).ConfigureAwait(false));
+				return DateTimeOffset.Parse(await m_Database.HashGetAsync(TimeStampObject, id.ToString()).ConfigureAwait(false));
 			} finally { m_SyncLock.Release(); }
 		}
 
@@ -286,7 +293,7 @@ namespace iChen.Persistence.Cloud
 			} finally { m_SyncLock.Release(); }
 		}
 
-		public IEnumerable<(uint id, string key, string field, object value, DateTimeOffset timestamp)> Dump () =>
-			throw new NotImplementedException();
+		public IEnumerable<(uint id, string key, string field, object value, DateTimeOffset timestamp)> Dump ()
+			=> throw new NotImplementedException();
 	}
 }

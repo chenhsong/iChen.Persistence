@@ -22,6 +22,7 @@ namespace iChen.Persistence.Cloud
 		public const string AlarmsTable = "Alarms";
 		public const string AuditTrailTable = "AuditTrail";
 		public const string EventsTable = "Events";
+		public const string LinksTable = "Links";
 
 		public const string Key = "k";
 		public const string OldValue = "x";
@@ -33,6 +34,8 @@ namespace iChen.Persistence.Cloud
 		public const string JobCard = "c";
 		public const string Mold = "m";
 		public const string Operator = "u";
+
+		public const string LinkMarker = "*";
 
 		public static string MakePartitionKey (string orgId, uint controller) =>
 			MakePartitionKey(orgId, controller, DateTimeOffset.UtcNow);
@@ -83,10 +86,47 @@ namespace iChen.Persistence.Cloud
 		}
 	}
 
+	public class Link : TableEntity
+	{
+		public string T { get; set; }
+		public string P { get; set; }
+		public string R { get; set; }
+
+		public Link (string table, string uniqueId, string partitionkey, string rowkey)
+		{
+			if (string.IsNullOrWhiteSpace(uniqueId)) throw new ArgumentNullException(nameof(uniqueId));
+			uniqueId = uniqueId.Trim();
+
+			this.T = !string.IsNullOrWhiteSpace(table) ? table.Trim() : throw new ArgumentNullException(nameof(table));
+			this.P = !string.IsNullOrWhiteSpace(partitionkey) ? partitionkey.Trim() : throw new ArgumentNullException(nameof(partitionkey));
+			this.R = !string.IsNullOrWhiteSpace(rowkey) ? rowkey.Trim() : throw new ArgumentNullException(nameof(rowkey));
+
+			if (this.R.EndsWith(uniqueId)) {
+				// If prefix, then just leave the prefix
+				this.R = this.R.Substring(0, this.R.Length - uniqueId.Length);
+			} else if (this.R.Contains(uniqueId)) {
+				// Otherwise 
+				this.R = this.R.Replace(uniqueId, Storage.LinkMarker);
+			}
+
+			this.PartitionKey = "x";
+			this.RowKey = uniqueId;
+		}
+
+		public string RedirectedPartition => this.P;
+
+		public string RedirectedRowKey => this.R.Contains(Storage.LinkMarker)
+										? this.R.Replace(Storage.LinkMarker, this.RowKey)
+										: this.R + this.RowKey;
+	}
+
 	public abstract class EntryBase
 	{
 		[JsonIgnore]
 		public static string ClassInsertStatement { get; }
+
+		[JsonIgnore]
+		public string ID { get; set; }
 
 		[JsonIgnore]
 		public string OrgId { get; }
@@ -101,19 +141,21 @@ namespace iChen.Persistence.Cloud
 		public int Sequence { get; }
 
 		[JsonIgnore]
-		public virtual bool UseBatches { get { return true; } }
+		public virtual bool UseBatches => true;
 
 		static EntryBase ()
 		{
 			ClassInsertStatement = "(OrgId, Controller, Time) VALUES (?, ?, ?)";
 		}
 
-		public EntryBase (string orgId, uint controller, DateTimeOffset time)
+		public EntryBase (string uniqueId, string orgId, uint controller, DateTimeOffset time)
 		{
+			if (uniqueId != null && string.IsNullOrWhiteSpace(uniqueId)) throw new ArgumentNullException(nameof(uniqueId));
 			if (orgId == null) orgId = DataStore.DefaultOrgId;
 			if (string.IsNullOrWhiteSpace(orgId)) throw new ArgumentNullException(nameof(orgId));
 			if (controller < 0) throw new ArgumentOutOfRangeException(nameof(controller));
 
+			this.ID = string.IsNullOrWhiteSpace(uniqueId) ? null : uniqueId.Trim();
 			this.OrgId = orgId;
 			this.Controller = controller;
 			this.Time = time;
@@ -203,7 +245,8 @@ namespace iChen.Persistence.Cloud
 			ClassInsertStatement = ClassInsertStatement.Substring(0, ClassInsertStatement.Length - 1) + ", ?, ?)";
 		}
 
-		public KeyEntryBase (string orgId, uint controller, string key, DateTimeOffset time) : base(orgId, controller, time)
+		public KeyEntryBase (string uniqueId, string orgId, uint controller, string key, DateTimeOffset time)
+			: base(uniqueId, orgId, controller, time)
 		{
 			if (controller <= 0) throw new ArgumentOutOfRangeException(nameof(controller));
 			if (string.IsNullOrWhiteSpace(key)) throw new ArgumentNullException(nameof(key));
@@ -255,7 +298,8 @@ namespace iChen.Persistence.Cloud
 			ClassInsertStatement = KeyEntryBase.ClassInsertStatement.Replace("<KeyName>", DatabaseKeyField).Replace("<ValueName>", DatabaseValueField);
 		}
 
-		public Alarm (string orgId, uint controller, string key, bool state, DateTimeOffset time = default(DateTimeOffset)) : base(orgId, controller, key, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
+		public Alarm (string uniqueId, string orgId, uint controller, string key, bool state, DateTimeOffset time = default(DateTimeOffset))
+			: base(uniqueId, orgId, controller, key, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
 		{
 			this.State = state;
 		}
@@ -309,11 +353,12 @@ namespace iChen.Persistence.Cloud
 
 		static CycleData ()
 		{
-			ClassInsertStatement = EntryBase.ClassInsertStatement.Replace(") VALUES (", ", Operator, OpMode, JobMode, JobCard, Mold) VALUES (");
-			ClassInsertStatement = ClassInsertStatement.Substring(0, ClassInsertStatement.Length - 1) + ", ?, ?, ?, ?, ?)";
+			ClassInsertStatement = EntryBase.ClassInsertStatement.Replace(") VALUES (", ", Operator, OpMode, JobMode, JobCard, Mold, UniqueID) VALUES (");
+			ClassInsertStatement = ClassInsertStatement.Substring(0, ClassInsertStatement.Length - 1) + ", ?, ?, ?, ?, ?, ?)";
 		}
 
-		public CycleData (string orgId, uint controller, OpModes opmode, JobModes jobmode, int user, string jobcard, string mold, IReadOnlyDictionary<string, double> data = null, DateTimeOffset time = default(DateTimeOffset)) : base(orgId, controller, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
+		public CycleData (string uniqueId, string orgId, uint controller, OpModes opmode, JobModes jobmode, int user, string jobcard, string mold, IReadOnlyDictionary<string, double> data = null, DateTimeOffset time = default(DateTimeOffset))
+			: base(uniqueId, orgId, controller, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
 		{
 			if (controller <= 0) throw new ArgumentOutOfRangeException(nameof(controller));
 			if (mold != null && string.IsNullOrWhiteSpace(mold)) throw new ArgumentNullException(nameof(mold));
@@ -347,7 +392,7 @@ namespace iChen.Persistence.Cloud
 				if (kv.Value.PropertyType == EdmType.Boolean) {
 					val = kv.Value.BooleanValue.Value ? 1.0 : 0;
 				} else if (kv.Value.PropertyType == EdmType.Int32) {
-					val = (double) kv.Value.Int32Value.Value / ((double) Storage.DoubleValueMultiplier);
+					val = kv.Value.Int32Value.Value / ((double) Storage.DoubleValueMultiplier);
 				} else {
 					continue;
 				}
@@ -369,6 +414,7 @@ namespace iChen.Persistence.Cloud
 			if (IsColumnAvailable(drow, "JobMode")) this.JobMode = (JobModes) (byte) drow["JobMode"];
 			if (IsColumnAvailable(drow, "JobCard")) this.JobCardId = drow["JobCard"].ToString();
 			if (IsColumnAvailable(drow, "Mold")) this.MoldId = drow["Mold"].ToString();
+			if (IsColumnAvailable(drow, "UniqueID")) this.ID = drow["UniqueID"].ToString();
 
 			if (data != null) {
 				foreach (var kv in data) m_Data[kv.Key.Trim().ToUpperInvariant()] = kv.Value;
@@ -453,6 +499,7 @@ namespace iChen.Persistence.Cloud
 			parameters.Add(makeParam("JobMode", DbType.Byte, 0, JobMode));
 			parameters.Add(makeParam("JobCard", DbType.String, 100, (object) JobCardId ?? DBNull.Value));
 			parameters.Add(makeParam("Mold", DbType.String, 100, (object) MoldId ?? DBNull.Value));
+			parameters.Add(makeParam("UniqueID", DbType.String, 100, (object) ID ?? DBNull.Value));
 		}
 	}
 
@@ -468,14 +515,15 @@ namespace iChen.Persistence.Cloud
 		public IList<ushort> Data { get; }
 
 		[JsonIgnore]
-		public override bool UseBatches { get { return false; } }
+		public override bool UseBatches => false;
 
 		/// <summary>Save (if not existing) or update (if existing) a set of mold data</summary>
 		/// <param name="controller">Unique controller ID</param>
 		/// <param name="guid">GUID of the mold record (not its numeric ID) - this is to prevent ID collision between multiple instances of the iChen server each with a separate database</param>
 		/// <param name="name">Name of the mold</param>
 		/// <param name="data">Mold data</param>
-		public MoldData (string orgId, uint controller, Guid guid, string name, IList<ushort> data, DateTimeOffset time = default(DateTimeOffset)) : base(orgId, controller, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
+		public MoldData (string uniqueId, string orgId, uint controller, Guid guid, string name, IList<ushort> data, DateTimeOffset time = default(DateTimeOffset))
+			: base(uniqueId, orgId, controller, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
 		{
 			if (controller <= 0) throw new ArgumentOutOfRangeException(nameof(controller));
 			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
@@ -548,7 +596,8 @@ namespace iChen.Persistence.Cloud
 			ClassInsertStatement = ClassInsertStatement.Substring(0, ClassInsertStatement.Length - 1) + ", ?, ?)";
 		}
 
-		public AuditTrail (string orgId, uint controller, string key, double value, double? oldvalue, int user, DateTimeOffset time = default(DateTimeOffset)) : base(orgId, controller, key, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
+		public AuditTrail (string uniqueId, string orgId, uint controller, string key, double value, double? oldvalue, int user, DateTimeOffset time = default(DateTimeOffset))
+			: base(uniqueId, orgId, controller, key, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
 		{
 			this.OperatorId = user;
 			this.Value = value;
@@ -558,8 +607,8 @@ namespace iChen.Persistence.Cloud
 		public AuditTrail (DynamicTableEntity entity) : base(entity)
 		{
 			if (entity.Properties.TryGetValue(Storage.Operator, out var prop)) OperatorId = prop.Int32Value.Value;
-			if (entity.Properties.TryGetValue(Storage.Value, out prop)) Value = (double) prop.Int32Value.Value / (double) Storage.DoubleValueMultiplier;
-			if (entity.Properties.TryGetValue(Storage.OldValue, out prop)) OldValue = (double) prop.Int32Value.Value / (double) Storage.DoubleValueMultiplier;
+			if (entity.Properties.TryGetValue(Storage.Value, out prop)) Value = prop.Int32Value.Value / (double) Storage.DoubleValueMultiplier;
+			if (entity.Properties.TryGetValue(Storage.OldValue, out prop)) OldValue = prop.Int32Value.Value / (double) Storage.DoubleValueMultiplier;
 		}
 
 		public AuditTrail (DataRow drow) : base(drow)
@@ -588,7 +637,7 @@ namespace iChen.Persistence.Cloud
 
 			parameters.Add(makeParam("Value", DbType.Single, 0, (float) Value));
 			parameters.Add(makeParam("OldValue", DbType.Single, 0, OldValue.HasValue ? (object) OldValue.Value : DBNull.Value));
-			parameters.Add(makeParam("Operator", DbType.Int32, 0, (int) OperatorId));
+			parameters.Add(makeParam("Operator", DbType.Int32, 0, OperatorId));
 		}
 	}
 
@@ -618,7 +667,8 @@ namespace iChen.Persistence.Cloud
 		}
 
 		/// <summary>Store a log message as an event</summary>
-		public Event (string type, string message, DateTimeOffset time = default(DateTimeOffset)) : base(null, 0, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
+		public Event (string uniqueId, string type, string message, DateTimeOffset time = default(DateTimeOffset))
+			: base(uniqueId, null, 0, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
 		{
 			if (string.IsNullOrWhiteSpace(type)) throw new ArgumentNullException(nameof(type));
 			if (string.IsNullOrWhiteSpace(message)) throw new ArgumentNullException(nameof(message));
@@ -628,7 +678,8 @@ namespace iChen.Persistence.Cloud
 		}
 
 		/// <summary>Store a log message as an event</summary>
-		public Event (string orgId, uint controller, string type, string message, DateTimeOffset time = default(DateTimeOffset)) : base(orgId, controller, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
+		public Event (string uniqueId, string orgId, uint controller, string type, string message, DateTimeOffset time = default(DateTimeOffset))
+			: base(uniqueId, orgId, controller, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
 		{
 			if (controller <= 0) throw new ArgumentOutOfRangeException(nameof(controller));
 			if (string.IsNullOrWhiteSpace(type)) throw new ArgumentNullException(nameof(type));
@@ -640,7 +691,8 @@ namespace iChen.Persistence.Cloud
 
 		/// <param name="jobcard">Use an empty string to clear this value. Null will be interpreted as no change.</param>
 		/// <param name="mold">Use Guid.Empty to clear this value. Null will be interpreted as no change.</param>
-		public Event (string orgId, uint controller, bool? connected, string IP, double? geo_latitude, double? geo_longitude, OpModes? opmode, JobModes? jobmode, string jobcard, int? user, Guid? mold, DateTimeOffset time = default(DateTimeOffset)) : base(orgId, controller, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
+		public Event (string uniqueId, string orgId, uint controller, bool? connected, string IP, double? geo_latitude, double? geo_longitude, OpModes? opmode, JobModes? jobmode, string jobcard, int? user, Guid? mold, DateTimeOffset time = default(DateTimeOffset))
+			: base(uniqueId, orgId, controller, time == default(DateTimeOffset) ? DateTimeOffset.UtcNow : time)
 		{
 			if (controller <= 0) throw new ArgumentOutOfRangeException(nameof(controller));
 			this.IP = IP;

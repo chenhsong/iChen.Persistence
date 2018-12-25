@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using iChen.OpenProtocol;
 using Newtonsoft.Json;
 
 namespace iChen.Persistence.Server
@@ -14,7 +13,7 @@ namespace iChen.Persistence.Server
 		public float? TimeZoneOffset { get; set; }    // Version_TimeZoneOffset
 		public bool IsEnabled { get; set; } = true;
 		public string Name { get; set; }
-		public ControllerTypes Type { get; set; } = ControllerTypes.Unknown;
+		public int Type { get; set; } = 0;
 		public string Version { get; set; }
 		public string Model { get; set; }
 		public string IP { get; set; }

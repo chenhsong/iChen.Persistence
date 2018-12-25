@@ -11,11 +11,13 @@ namespace iChen.Persistence.Cloud
 {
 	public partial class AzureTableStore : IDisposable
 	{
-		public const int RefreshInterval = 60000;
-		public const int MaxBatchSize = 99;
-		public const int BatchSize = 5;
-		public const int MaxUploadInterval = 5 * 60000;
+		public const uint RefreshInterval = 1000;
+		public const uint MaxBatchSize = 99;
+		public const uint MaxUploadInterval = 5 * 60000;
 		public const uint MaxBufferSize = 100000;
+
+		public readonly uint BatchSize = 5;
+		public readonly uint CycleDataBatchSize = 5;
 
 		private readonly CloudStorageAccount m_StorageAccount = null;
 		private readonly CloudTableClient m_TableClient = null;
@@ -24,6 +26,7 @@ namespace iChen.Persistence.Cloud
 		private readonly CloudTable m_AlarmsTable = null;
 		private readonly CloudTable m_AuditTrailTable = null;
 		private readonly CloudTable m_EventsTable = null;
+		private readonly CloudTable m_LinksTable = null;
 
 		private readonly uint m_MaxMessages = MaxBufferSize;
 		private readonly ConcurrentQueue<CycleData> m_CycleDataQueue = new ConcurrentQueue<CycleData>();
@@ -33,11 +36,12 @@ namespace iChen.Persistence.Cloud
 		private readonly ConcurrentQueue<Event> m_EventsQueue = new ConcurrentQueue<Event>();
 
 		private readonly string m_RowKeyBase = GuidEncoder.Encode(Guid.NewGuid());
-		private long m_Seq = 1;
-		private Task m_RefreshLoop = null;
+		private ulong m_Seq = 1;
+		private readonly Task m_RefreshLoop = null;
 		private bool m_IsRunning = false;
-		private List<EntryBase> m_Buffer = new List<EntryBase>();
-		private DateTime m_LastDataTime = DateTime.MinValue;
+		private readonly List<EntryBase> m_Buffer = new List<EntryBase>();
+		private DateTime m_LastEnqueueTime = DateTime.MinValue;
+		private DateTime m_LastDebugMessage = DateTime.MinValue;
 
 		public event Action<string> OnLog;
 		public event Action<string> OnDebug;
@@ -45,18 +49,25 @@ namespace iChen.Persistence.Cloud
 		public event Action<int, ICollection<EntryBase>, string> OnUploadError;
 		public event Action<Exception, string> OnError;
 
-		public AzureTableStore (string account, string signature, uint maxbuffer = MaxBufferSize)
+		public AzureTableStore (string account, string signature, uint batch = 0, uint cycle_data_batch = 0, bool useHttps = true, uint maxbuffer = MaxBufferSize, Action<string> onDebug = null)
 		{
 			if (string.IsNullOrWhiteSpace(account)) throw new ArgumentNullException(nameof(account));
 			if (string.IsNullOrWhiteSpace(signature)) throw new ArgumentNullException(nameof(signature));
+
+			if (batch > 0) CycleDataBatchSize = BatchSize = batch;
+			if (cycle_data_batch > 0) CycleDataBatchSize = cycle_data_batch;
+
 			m_MaxMessages = maxbuffer;
+			OnDebug += onDebug;
 
 			//var conn = $"DefaultEndpointsProtocol=https;AccountName={account};AccountKey={password}";
 
-			OnDebug?.Invoke($"Connecting to Azure storage account {account}...");
-			m_StorageAccount = new CloudStorageAccount(new StorageCredentials(signature), account, null, false);
+			OnDebug?.Invoke($"Connecting to Azure Storage account {account} using {(useHttps ? "HTTPS" : "HTTP")}...");
+			OnDebug?.Invoke($"Upload batch size = {BatchSize}, Cycle data upload batch size = {CycleDataBatchSize}");
 
-			OnDebug?.Invoke("Getting Azure storage table client...");
+			m_StorageAccount = new CloudStorageAccount(new StorageCredentials(signature), account, null, useHttps);
+
+			OnDebug?.Invoke("Getting Azure Table Store client...");
 			m_TableClient = m_StorageAccount.CreateCloudTableClient();
 
 			OnDebug?.Invoke("Getting Azure tables...");
@@ -65,33 +76,44 @@ namespace iChen.Persistence.Cloud
 			m_AlarmsTable = m_TableClient.GetTableReference(Storage.AlarmsTable);
 			m_AuditTrailTable = m_TableClient.GetTableReference(Storage.AuditTrailTable);
 			m_EventsTable = m_TableClient.GetTableReference(Storage.EventsTable);
+			m_LinksTable = m_TableClient.GetTableReference(Storage.LinksTable);
 
-			OnDebug?.Invoke("Azure storage started.");
+			OnDebug?.Invoke("All tables obtained from Azure Table Store.");
 
 			m_IsRunning = true;
 
-			m_RefreshLoop = Task.Run(async () => {
-				OnDebug?.Invoke("Azure storage refresh loop started.");
+			m_RefreshLoop = RunRefreshLoopAsync();
+		}
 
-				while (true) {
-					await RefreshAsync();
+		private async Task RunRefreshLoopAsync ()
+		{
+			OnDebug?.Invoke("Azure Table Store refresh loop started.");
 
-					if (m_IsRunning) await Task.Delay(RefreshInterval).ConfigureAwait(false);
-					if (!m_IsRunning && m_Buffer.Count <= 0 && m_CycleDataQueue.Count <= 0 && m_MoldDataQueue.Count <= 0 && m_AuditTrailQueue.Count <= 0 && m_AlarmsQueue.Count <= 0) break;
+			while (true) {
+				if (m_Buffer.Count > 0 || OutBufferCount > 0) {
+					try {
+						await RefreshAsync();
+					} catch (Exception ex) {
+						OnError?.Invoke(ex, "Error when uploading to Azure Table Store.");
+					}
+				} else if (!m_IsRunning) {
+					break;
 				}
 
-				OnDebug?.Invoke("Azure storage refresh loop ended.");
-			});
+				await Task.Delay((int) RefreshInterval).ConfigureAwait(false);
+			}
+
+			OnDebug?.Invoke("Azure Table Store refresh loop ended.");
 		}
 
 		public void Close ()
 		{
-			OnLog?.Invoke("Azure storage terminating...");
+			OnDebug?.Invoke("Azure Table Store terminating...");
 
 			m_IsRunning = false;
-			m_RefreshLoop.Wait(RefreshInterval);
+			m_RefreshLoop?.Wait((int) RefreshInterval);
 
-			OnLog?.Invoke("Azure storage terminated.");
+			OnLog?.Invoke("Azure Table Store terminated.");
 		}
 
 		public void Dispose () => Close();
@@ -110,7 +132,8 @@ namespace iChen.Persistence.Cloud
 				default: throw new ApplicationException();
 			}
 
-			this.m_LastDataTime = DateTime.Now;
+			m_LastEnqueueTime = DateTime.Now;
+			m_LastDebugMessage = DateTime.MinValue;
 		}
 
 		private CloudTable MapTable (EntryBase entry)
@@ -126,7 +149,7 @@ namespace iChen.Persistence.Cloud
 			}
 		}
 
-		private void TakeIntoBuffer<T> (ConcurrentQueue<T> queue, int max = MaxBatchSize) where T : EntryBase
+		private void TakeIntoBuffer<T> (ConcurrentQueue<T> queue, uint max = MaxBatchSize) where T : EntryBase
 		{
 			string partition = null;
 
@@ -149,7 +172,7 @@ namespace iChen.Persistence.Cloud
 
 		private async Task RefreshAsync ()
 		{
-			// Prune the queues
+			// Prune the queues in order of least importance
 
 			while (OutBufferCount > m_MaxMessages) {
 				if (m_MoldDataQueue.Count > 0) { if (m_MoldDataQueue.TryDequeue(out _)) continue; }
@@ -159,21 +182,25 @@ namespace iChen.Persistence.Cloud
 				if (m_CycleDataQueue.Count > 0) { if (m_CycleDataQueue.TryDequeue(out _)) continue; }
 			}
 
-			OnDebug?.Invoke($"Azure - CYCLE:{m_CycleDataQueue.Count},AUDIT:{m_AuditTrailQueue.Count},ALARM:{m_AlarmsQueue.Count},MOLD:{m_MoldDataQueue.Count},EVENT:{m_EventsQueue.Count}" + (m_Buffer.Count > 0 ? $",BUF:{m_Buffer.Count}" : null));
+			if ((DateTime.Now - m_LastDebugMessage).TotalMilliseconds > MaxUploadInterval) {
+				OnDebug?.Invoke($"Azure - CYCLE:{m_CycleDataQueue.Count},AUDIT:{m_AuditTrailQueue.Count},ALARM:{m_AlarmsQueue.Count},MOLD:{m_MoldDataQueue.Count},EVENT:{m_EventsQueue.Count}" + (m_Buffer.Count > 0 ? $",BUF:{m_Buffer.Count}" : null));
+				m_LastDebugMessage = DateTime.Now;
+			}
 
 			if (m_Buffer.Count <= 0) {
 				// See if we have anything interesting
 				var minitems = BatchSize;
+				var mincycledata = CycleDataBatchSize;
 
 				// Not uploaded for a while, upload data anyway
 				if (!m_IsRunning) {
-					minitems = 1;
+					minitems = mincycledata = 1;
 				} else {
-					if (m_LastDataTime == DateTime.MinValue || (DateTime.Now - m_LastDataTime).TotalMilliseconds > MaxUploadInterval) minitems = 1;
+					if (m_LastEnqueueTime == DateTime.MinValue || (DateTime.Now - m_LastEnqueueTime).TotalMilliseconds > MaxUploadInterval) minitems = mincycledata = 1;
 				}
 
 				// Check cycle data first
-				if (m_CycleDataQueue.Count() >= minitems) {
+				if (m_CycleDataQueue.Count() >= mincycledata) {
 					TakeIntoBuffer(m_CycleDataQueue);
 				} else if (m_EventsQueue.Count() >= minitems) {
 					TakeIntoBuffer(m_EventsQueue);
@@ -193,13 +220,23 @@ namespace iChen.Persistence.Cloud
 		{
 			if (m_Buffer.Count > 1 && m_Buffer[0].UseBatches) {
 				// Batch upload
-				var batch = new TableBatchOperation();
-				foreach (var data in m_Buffer) batch.Insert(data.ToEntity(m_RowKeyBase + "-" + m_Seq++));
+				var table = MapTable(m_Buffer[0]);
+				var uploads = new TableBatchOperation();
+				var links = new TableBatchOperation();
+				var id = m_Buffer[0].Controller;
 
-				OnDebug?.Invoke($"Batch uploading {batch.Count} records to Azure storage...");
+				foreach (var data in m_Buffer) {
+					var entity = data.ToEntity(data.ID ?? m_RowKeyBase + "-" + m_Seq++);
+					uploads.Insert(entity);
+					if (data.ID != null) links.Insert(new Link(table.Name, data.ID, entity.PartitionKey, entity.RowKey));
+				}
+
+				OnDebug?.Invoke($"Batch uploading {uploads.Count} records to Azure table storage {table.Name} for controller [{id}]...");
 
 				try {
-					var r = await MapTable(m_Buffer[0]).ExecuteBatchAsync(batch);
+					if (links.Count > 0) await m_LinksTable.ExecuteBatchAsync(links);
+
+					var r = await table.ExecuteBatchAsync(uploads);
 
 					// Check for errors
 					var errors = m_Buffer
@@ -210,13 +247,13 @@ namespace iChen.Persistence.Cloud
 														.Where((entry, x) => r.Count > x && (r[x].HttpStatusCode == 201 || r[x].HttpStatusCode == 204))
 														.ToList();
 
-					OnUploadSuccess?.Invoke(201, successes, $"{m_Buffer.Count - errors.Count} record(s) out of {m_Buffer.Count} successfully uploaded to Azure storage.");
+					OnUploadSuccess?.Invoke(201, successes, $"{m_Buffer.Count - errors.Count} record(s) out of {m_Buffer.Count} for controller [{id}] successfully uploaded to Azure table storage {table.Name}.");
 
 					m_Buffer.Clear();
 
 					if (errors.Count > 0) {
 						m_Buffer.AddRange(errors);
-						OnUploadError?.Invoke(0, errors, $"{errors.Count} record(s) failed to upload to Azure storage.");
+						OnUploadError?.Invoke(0, errors, $"{errors.Count} record(s) for controller [{id}] failed to upload to Azure table storage {table.Name}.");
 					}
 				} catch (StorageException ex) {
 					var status = ex.RequestInformation.HttpStatusCode;
@@ -224,33 +261,41 @@ namespace iChen.Persistence.Cloud
 
 					switch (status) {
 						case 0: {
-								OnError?.Invoke(ex, $"Azure storage batch upload failed.");
+								OnError?.Invoke(ex, $"Azure table storage batch upload to {table.Name} for controller [{id}] failed.");
 								break;
 							}
 						case 401:
 						case 403: {
-								OnUploadError?.Invoke(status, m_Buffer, $"Azure storage batch upload forbidden: {errmsg}");
+								OnUploadError?.Invoke(status, m_Buffer, $"Azure table storage batch upload to {table.Name} for controller [{id}] forbidden: {errmsg}");
 								break;
 							}
 						default: {
-								OnUploadError?.Invoke(status, m_Buffer, $"Azure storage batch upload failed: {errmsg}");
+								OnUploadError?.Invoke(status, m_Buffer, $"Azure table storage batch upload to {table.Name} for controller [{id}] failed: {errmsg}");
 								break;
 							}
 					}
 				} catch (Exception ex) {
-					OnError?.Invoke(ex, $"Azure storage batch upload failed.");
+					OnError?.Invoke(ex, $"Azure table storage batch upload to {table.Name} for controller [{id}] failed.");
 				}
 			} else if (m_Buffer.Count > 0) {
 				// Single upload
 				var data = m_Buffer[0];
-				var insert = TableOperation.Insert(data.ToEntity(m_RowKeyBase + "-" + m_Seq++));
+				var id = data.Controller;
+				var table = MapTable(data);
+				var entity = data.ToEntity(data.ID ?? m_RowKeyBase + "-" + m_Seq++);
+				var insert = TableOperation.Insert(entity);
+				var link = (data.ID != null) ? TableOperation.Insert(new Link(table.Name, data.ID, entity.PartitionKey, entity.RowKey)) : null;
 
-				OnDebug?.Invoke($"Uploading record to Azure storage...");
+				OnDebug?.Invoke($"Uploading record to Azure table storage {table.Name} for controller [{id}]...");
 
 				try {
-					var r = await MapTable(data).ExecuteAsync(insert);
+					TableResult r;
 
-					OnUploadSuccess?.Invoke(r.HttpStatusCode, new[] { data }, $"Azure storage upload succeeded, result = {r.HttpStatusCode}.");
+					if (link != null) r = await m_LinksTable.ExecuteAsync(link);
+
+					r = await table.ExecuteAsync(insert);
+
+					OnUploadSuccess?.Invoke(r.HttpStatusCode, new[] { data }, $"Azure table storage upload to {table.Name} for controller [{id}] succeeded, result = {r.HttpStatusCode}.");
 					if (m_Buffer.Count <= 1) m_Buffer.Clear(); else m_Buffer.RemoveAt(0);
 				} catch (StorageException ex) {
 					var status = ex.RequestInformation.HttpStatusCode;
@@ -258,21 +303,21 @@ namespace iChen.Persistence.Cloud
 
 					switch (status) {
 						case 0: {
-								OnError?.Invoke(ex, $"Azure storage upload failed.");
+								OnError?.Invoke(ex, $"Azure table storage upload to {table.Name} for controller [{id}] failed.");
 								break;
 							}
 						case 401:
 						case 403: {
-								OnUploadError?.Invoke(status, new[] { data }, $"Azure storage upload forbidden: {errmsg}");
+								OnUploadError?.Invoke(status, new[] { data }, $"Azure table storage upload to {table.Name} for controller [{id}] forbidden: {errmsg}");
 								break;
 							}
 						default: {
-								OnUploadError?.Invoke(status, new[] { data }, $"Azure storage upload failed: {errmsg}");
+								OnUploadError?.Invoke(status, new[] { data }, $"Azure table storage upload to {table.Name} for controller [{id}] failed: {errmsg}");
 								break;
 							}
 					}
 				} catch (Exception ex) {
-					OnError?.Invoke(ex, "Azure storage upload failed.");
+					OnError?.Invoke(ex, $"Azure table storage upload to {table.Name} for controller [{id}] failed.");
 				}
 			}
 		}

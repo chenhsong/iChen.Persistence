@@ -4,13 +4,12 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <AssemblyName>iChen.Persistence.Config</AssemblyName>
     <RootNamespace>iChen.Persistence.Server</RootNamespace>
-    <Version>4.1.1.0</Version>
+    <Version>4.2</Version>
     <Authors />
     <Company>Chen Hsong Holdings Ltd.</Company>
     <Product>iChen Persistence</Product>
-    <Description>Data persistence layer for iChen 4.0.</Description>
+    <Description>Data persistence layer for iChen 4.2.</Description>
     <Copyright>Copyright © 2016-2018 by Chen Hsong Holdings Ltd.  All rights reserved.</Copyright>
-    <FileVersion>4.1.1.0</FileVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
@@ -19,8 +18,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.DotNet.Analyzers.Compatibility" Version="0.1.2-alpha" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="2.1.1" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="2.1.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="2.1.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="2.1.2" />
     <PackageReference Include="Newtonsoft.Json" Version="11.0.2" />
     <PackageReference Include="System.Memory" Version="4.5.1" />
   </ItemGroup>

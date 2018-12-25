@@ -2,14 +2,13 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Azure.Devices;
 using Microsoft.Azure.Devices.Client;
+using Microsoft.Azure.Devices.Client.Exceptions;
 using Microsoft.Azure.Devices.Shared;
 using Newtonsoft.Json.Linq;
-
 using DoubleDict = System.Collections.Generic.IReadOnlyDictionary<string, double>;
 using ObjDict = System.Collections.Generic.IReadOnlyDictionary<string, object>;
 
@@ -17,14 +16,24 @@ namespace iChen.Persistence.Cloud
 {
 	public class AzureIoTHub : ISharedCache
 	{
-		public const string HeartBeatProperty = "LastHeartBeatTime";
+		private const string HeartBeatProperty = "LastHeartBeatTime";
 
-		public readonly string DeviceConnectionStringFormat;
-		public readonly RegistryManager m_Server = null;
-		private readonly SemaphoreSlim m_ServerSyncLock = new SemaphoreSlim(1, 1);
-		public readonly ConcurrentDictionary<uint, (DeviceClient device, SemaphoreSlim sync)> m_Clients
-			= new ConcurrentDictionary<uint, (DeviceClient, SemaphoreSlim)>();
+		// Careful - twin reads/writes may be throttled at 10/sec.
+		protected uint ReadThrottle = 200;
+		protected uint WriteThrottle = 500;
+		protected uint MessageThrottle = 100;
+		protected uint TimeOutInterval = 30000;
+		protected uint WaitInterval = 1000;
+		protected int Retry = 5;
 
+		private bool m_IsRunning = false;
+		private readonly Task m_RefreshTask;
+
+		private readonly string m_DeviceConnectionStringFormat;
+		private readonly RegistryManager m_Server = null;
+		private readonly SemaphoreSlim m_Lock = new SemaphoreSlim(1, 1);
+		private readonly ConcurrentDictionary<uint, DeviceClient> m_Clients = new ConcurrentDictionary<uint, DeviceClient>();
+		private readonly ConcurrentDictionary<uint, (TwinCollection Twin, DateTime Time)> m_Updates = new ConcurrentDictionary<uint, (TwinCollection Twin, DateTime Time)>();
 
 		private static readonly ObjDict m_TextValueMaps = new Dictionary<string, object>(StringComparer.InvariantCultureIgnoreCase)
 		{
@@ -38,32 +47,128 @@ namespace iChen.Persistence.Cloud
 			if (string.IsNullOrWhiteSpace(device_conn)) throw new ArgumentNullException(nameof(device_conn));
 			if (server_conn != null && string.IsNullOrWhiteSpace(server_conn)) throw new ArgumentNullException(nameof(server_conn));
 
-			this.DeviceConnectionStringFormat = device_conn;
-			this.m_Server = RegistryManager.CreateFromConnectionString(server_conn);
+			m_DeviceConnectionStringFormat = device_conn;
+
+			if (!string.IsNullOrWhiteSpace(server_conn)) m_Server = RegistryManager.CreateFromConnectionString(server_conn);
+
+			m_IsRunning = true;
+			m_RefreshTask = RunRefreshLoopAsync();
 		}
 
 		public virtual void Dispose ()
 		{
-			foreach (var (device, sync) in m_Clients.Values) {
-				sync.Wait();
-				try { device.Dispose(); } finally { sync.Release(); }
-				sync.Dispose();
+			m_IsRunning = false;
+
+			foreach (var kv in m_Clients) {
+				var device = kv.Value;
+
+				m_Lock.Wait();
+				try { device.Dispose(); } finally { m_Lock.Release(); }
+				m_Lock.Dispose();
 			}
 
 			m_Clients.Clear();
 
 			if (m_Server != null) {
-				m_ServerSyncLock.Wait();
-				try { m_Server.Dispose(); } finally { m_ServerSyncLock.Release(); }
-				m_ServerSyncLock.Dispose();
+				m_Lock.Wait();
+				try { m_Server.Dispose(); } finally { m_Lock.Release(); }
+				m_Lock.Dispose();
 			}
 		}
 
-		private (DeviceClient device, SemaphoreSlim sync) GetDeviceClient (uint id) =>
-			m_Clients.GetOrAdd(id, k => (
-				device: DeviceClient.CreateFromConnectionString(string.Format(DeviceConnectionStringFormat, k), Microsoft.Azure.Devices.Client.TransportType.Amqp),
-				sync: new SemaphoreSlim(1, 1)
-			));
+		private void RethrowAzureIotHubException (uint id, IotHubException ex)
+		{
+			switch (ex) {
+				case DeviceNotFoundException _: throw new UnauthorizedAccessException($"Device {id} is not registered on Azure IOT Hub!", ex);
+				case DeviceDisabledException _: throw new UnauthorizedAccessException($"Device {id} is disabled!", ex);
+				case DeviceMaximumQueueDepthExceededException _: throw new UnauthorizedAccessException($"Too many messages pending Device {id}: {ex.Message}", ex);
+				case MessageTooLargeException _: throw new UnauthorizedAccessException($"Message sent to Device {id} is too large: {ex.Message}", ex);
+				case QuotaExceededException _: throw new UnauthorizedAccessException($"Azure IOT Hub quota exceeded: {ex.Message}", ex);
+				case IotHubThrottledException _: throw new UnauthorizedAccessException($"Azure IOT Hub bandwidth exceeded: {ex.Message}", ex);
+				case UnauthorizedException _:
+					throw new UnauthorizedAccessException(m_Server != null
+												? $"Access to Azure IOT Hub is refused!"
+												: $"Device {id} is not enabled on Azure IOT Hub or access to Azure IOT Hub is refused!", ex);
+			}
+		}
+
+		private async Task RunRefreshLoopAsync ()
+		{
+			for (; m_IsRunning;) {
+				uint id = 0;
+				TwinCollection twin = null;
+
+				if (m_Updates.Count > 0) {
+					var entry = m_Updates
+												.OrderBy(kv => kv.Value.Time)
+												.Where(kv => (DateTime.Now - kv.Value.Time).TotalMilliseconds > WaitInterval)
+												.FirstOrDefault();
+
+					if (entry.Value != default) {
+						id = entry.Key;
+						twin = entry.Value.Twin;
+						m_Updates.TryRemove(entry.Key, out _);
+					}
+				}
+
+				if (twin != null) {
+					var retry = Retry;
+
+					for (; ; ) {
+						await m_Lock.WaitAsync().ConfigureAwait(false);
+
+						try {
+							BeforeTwinUpdate(id, retry < Retry);
+
+							//if (m_Server != null) {
+							//	await m_Server.UpdateTwinAsync(id.ToString(), twin, null).ConfigureAwait(false);
+							//} else {
+							DeviceClient device = GetDeviceClient(id);
+							await device.UpdateReportedPropertiesAsync(twin).ConfigureAwait(false);
+							//}
+
+							AfterTwinUpdate(id, retry < Retry);
+							await Task.Delay((int) WriteThrottle);
+							break;
+						} catch (IotHubException ex) {
+							try { RethrowAzureIotHubException(id, ex); } catch (Exception ex2) {
+								// Azure IOT Hub exception
+								OnError(id, ex2);
+								break;
+							}
+						} catch (Exception ex) {
+							if (retry <= 0) {
+								// No more retries
+								OnError(id, new ApplicationException($"Error when updating Azure IOT Hub device {id}!", ex));
+								break;
+							}
+
+							// Retry after a wait
+							await Task.Delay((new Random()).Next(3000) + 2000);
+							retry--;
+							OnRetry(id, Retry - retry, ex);
+						} finally { m_Lock.Release(); }
+					}
+				}
+
+				await Task.Delay(100);
+			}
+		}
+
+		protected virtual void BeforeTwinUpdate (uint id, bool retry) { }
+
+		protected virtual void AfterTwinUpdate (uint id, bool retry) { }
+
+		protected virtual void OnError (uint id, Exception ex) { }
+
+		protected virtual void OnRetry (uint id, int count, Exception ex) { }
+
+		private DeviceClient GetDeviceClient (uint id) =>
+			m_Clients.GetOrAdd(id, k => {
+				DeviceClient device = DeviceClient.CreateFromConnectionString(string.Format(m_DeviceConnectionStringFormat, k), Microsoft.Azure.Devices.Client.TransportType.Mqtt);
+				device.OperationTimeoutInMilliseconds = TimeOutInterval;
+				return device;
+			});
 
 		private static double DecodeJObject (JObject jval, string field)
 		{
@@ -114,17 +219,16 @@ namespace iChen.Persistence.Cloud
 
 				case TwinCollection tcol: {
 						// Sometimes the JSON document comes back with objects that are TwinCollection
-						return tcol
-										.Cast<KeyValuePair<string, object>>()
-										.Select(kv => new KeyValuePair<string, object>(kv.Key, DecodeValue(kv.Value)))
-										.Where(kv => kv.Value is double)
-										.ToDictionary(kv => kv.Key, kv => (double) kv.Value);
+						return tcol.Cast<KeyValuePair<string, object>>()
+												.Select(kv => new KeyValuePair<string, object>(kv.Key, DecodeValue(kv.Value)))
+												.Where(kv => kv.Value is double)
+												.ToDictionary(kv => kv.Key, kv => (double) kv.Value);
 					}
 
 				case JObject jval: {
 						return jval.Properties()
-										.Where(prop => prop.Value.Type == JTokenType.Float || prop.Value.Type == JTokenType.Integer)
-										.ToDictionary(prop => prop.Name, prop => prop.Value.Value<double>());
+												.Where(prop => prop.Value.Type == JTokenType.Float || prop.Value.Type == JTokenType.Integer)
+												.ToDictionary(prop => prop.Name, prop => prop.Value.Value<double>());
 					}
 
 				default: throw new ApplicationException($"Invalid node in JSON document: [{value.GetType().Name}].");
@@ -134,39 +238,50 @@ namespace iChen.Persistence.Cloud
 
 		private async Task<Twin> GetTwinAsync (uint id)
 		{
-			if (m_Server != null) {
-				await m_ServerSyncLock.WaitAsync().ConfigureAwait(false);
+			await m_Lock.WaitAsync().ConfigureAwait(false);
 
-				try {
-					return await m_Server.GetTwinAsync(id.ToString()).ConfigureAwait(false);
-				} finally { m_ServerSyncLock.Release(); }
-			} else {
-				var (device, sync) = GetDeviceClient(id);
+			try {
+				Twin twin;
 
-				await sync.WaitAsync().ConfigureAwait(false);
+				if (m_Server != null) {
+					twin = await m_Server.GetTwinAsync(id.ToString()).ConfigureAwait(false);
+					if (twin == null) throw new UnauthorizedAccessException($"Device {id} is not registered on Azure IOT Hub!");
+				} else {
+					var device = GetDeviceClient(id);
+					twin = await device.GetTwinAsync().ConfigureAwait(false);
+				}
 
-				try {
-					return await device.GetTwinAsync().ConfigureAwait(false);
-				} finally { sync.Release(); }
-			}
+				await Task.Delay((int) ReadThrottle).ConfigureAwait(false);
+				return twin;
+			} catch (IotHubException ex) {
+				RethrowAzureIotHubException(id, ex);
+				throw;
+			} finally { m_Lock.Release(); }
 		}
 
 		public virtual async Task<(ObjDict dict, DateTimeOffset timestamp)> GetAsync (uint id)
 		{
-			Twin twin = await GetTwinAsync(id);
+			var twin = await GetTwinAsync(id);
 
 			var dict = twin.Properties.Reported
-										.Cast<KeyValuePair<string, object>>()
-										.ToDictionary(kv => kv.Key, kv => DecodeValue(kv.Value));
+											.Cast<KeyValuePair<string, object>>()
+											.ToDictionary(kv => kv.Key, kv => DecodeValue(kv.Value));
 
-			var timestamp = new DateTimeOffset(twin.Properties.Reported.GetLastUpdated(), TimeSpan.Zero);
+			if (twin.Properties.Reported.Contains(HeartBeatProperty))
+				return (dict, DateTimeOffset.Parse(DecodeValue(twin.Properties.Reported[HeartBeatProperty])));
 
-			return (dict, timestamp);
+			try {
+				var timestamp = twin.Properties.Reported.GetLastUpdated();
+				return (dict, new DateTimeOffset(timestamp, TimeSpan.Zero));
+			} catch (NullReferenceException) {
+				// No authority to get timestamp
+				return (dict, DateTimeOffset.UtcNow);
+			}
 		}
 
 		public virtual async Task<T> GetAsync<T> (uint id, string key)
 		{
-			Twin twin = await GetTwinAsync(id);
+			var twin = await GetTwinAsync(id);
 
 			if (!twin.Properties.Reported.Contains(key)) throw new ArgumentOutOfRangeException(nameof(key), $"Invalid property: [{key}].");
 
@@ -184,7 +299,7 @@ namespace iChen.Persistence.Cloud
 
 		public virtual async Task<double> GetAsync (uint id, string key, string field)
 		{
-			Twin twin = await GetTwinAsync(id);
+			var twin = await GetTwinAsync(id);
 
 			if (!twin.Properties.Reported.Contains(key)) throw new ArgumentOutOfRangeException(nameof(key), $"Invalid property: [{key}].");
 
@@ -202,14 +317,22 @@ namespace iChen.Persistence.Cloud
 
 		public virtual async Task<DateTimeOffset> GetTimeStampAsync (uint id)
 		{
-			Twin twin = await GetTwinAsync(id);
+			var twin = await GetTwinAsync(id);
 
-			return new DateTimeOffset(twin.Properties.Reported.GetLastUpdated(), TimeSpan.Zero);
+			if (twin.Properties.Reported.Contains(HeartBeatProperty))
+				return DateTimeOffset.Parse(DecodeValue(twin.Properties.Reported[HeartBeatProperty]));
+
+			try {
+				return new DateTimeOffset(twin.Properties.Reported.GetLastUpdated(), TimeSpan.Zero);
+			} catch (NullReferenceException) {
+				// No authority to get timestamp
+				return DateTimeOffset.UtcNow;
+			}
 		}
 
 		public virtual async Task<bool> HasAsync (uint id, string key)
 		{
-			Twin twin = await GetTwinAsync(id);
+			var twin = await GetTwinAsync(id);
 
 			return twin.Properties.Reported.Contains(key);
 		}
@@ -218,15 +341,15 @@ namespace iChen.Persistence.Cloud
 
 		private async Task UpdateValueAsync (uint id, string key, dynamic value)
 		{
-			var col = new TwinCollection { [key] = value };
+			var col = m_Updates.AddOrUpdate(id, (Twin: new TwinCollection(), Time: DateTime.Now),
+																					(_, v) => (Twin: v.Twin, Time: DateTime.Now));
 
-			var (device, sync) = GetDeviceClient(id);
+			lock (col.Twin) {
+				col.Twin[key] = value;
+				col.Twin[HeartBeatProperty] = DateTimeOffset.Now.ToString("O");
+			}
 
-			await sync.WaitAsync().ConfigureAwait(false);
-
-			try {
-				await device.UpdateReportedPropertiesAsync(col).ConfigureAwait(false);
-			} finally { sync.Release(); }
+			await Task.CompletedTask;
 		}
 
 		public virtual Task SetAsync (uint id, string key, uint value) => UpdateValueAsync(id, key, value);
@@ -237,89 +360,111 @@ namespace iChen.Persistence.Cloud
 
 		public virtual async Task SetAsync (uint id, ObjDict values)
 		{
-			var col = new TwinCollection();
+			var col = m_Updates.AddOrUpdate(id, (Twin: new TwinCollection(), Time: DateTime.Now),
+																					(_, v) => (Twin: v.Twin, Time: DateTime.Now));
 
-			foreach (var kv in values) {
-				switch (kv.Value) {
-					case DoubleDict hashvalues: {
-							if (hashvalues.Count > 0) {
-								var hash = new TwinCollection();
-								foreach (var kv2 in hashvalues) hash[kv2.Key] = kv2.Value;
-								col[kv.Key] = hash;
-							} else {
-								// Remove the property if the entire dictionary is empty
-								col[kv.Key] = null;
+			lock (col.Twin) {
+				foreach (var kv in values) {
+					switch (kv.Value) {
+						case DoubleDict hashvalues: {
+								if (hashvalues.Count > 0) {
+									var hash = new TwinCollection();
+									foreach (var kv2 in hashvalues) hash[kv2.Key] = kv2.Value;
+									col.Twin[kv.Key] = hash;
+								} else {
+									// Remove the property if the entire dictionary is empty
+									col.Twin[kv.Key] = null;
+								}
+								break;
 							}
-							break;
-						}
-					case int _:
-					case uint _:
-					case bool _:
-					case string _:
-					case double _: col[kv.Key] = kv.Value; break;
+						case int _:
+						case uint _:
+						case bool _:
+						case string _:
+						case double _: col.Twin[kv.Key] = kv.Value; break;
 
-					default: throw new ArgumentOutOfRangeException(nameof(values), $"Invalid data type: {kv.Value.GetType().Name}.");
+						default: throw new ArgumentOutOfRangeException(nameof(values), $"Invalid data type: {kv.Value.GetType().Name}.");
+					}
 				}
+
+				col.Twin[HeartBeatProperty] = DateTimeOffset.Now.ToString("O");
 			}
 
-			var (device, sync) = GetDeviceClient(id);
-
-			await sync.WaitAsync().ConfigureAwait(false);
-
-			try {
-				await device.UpdateReportedPropertiesAsync(col).ConfigureAwait(false);
-			} finally { sync.Release(); }
+			await Task.CompletedTask;
 		}
 
 		public virtual async Task SetAsync (uint id, string key, DoubleDict value)
 		{
-			var root = new TwinCollection();
+			var root = m_Updates.AddOrUpdate(id, (Twin: new TwinCollection(), Time: DateTime.Now),
+																						(_, v) => (Twin: v.Twin, Time: DateTime.Now));
 
-			if (value.Count > 0) {
-				var col = new TwinCollection();
+			lock (root.Twin) {
+				if (value.Count > 0) {
+					var col = new TwinCollection();
 
-				foreach (var kv in value) col[kv.Key] = kv.Value;
-				root[key] = col;
-			} else {
-				// Remove the property if the entire dictionary is empty
-				root[key] = null;
+					foreach (var kv in value) col[kv.Key] = kv.Value;
+					root.Twin[key] = col;
+				} else {
+					// Remove the property if the entire dictionary is empty
+					root.Twin[key] = null;
+				}
+
+				root.Twin[HeartBeatProperty] = DateTimeOffset.Now.ToString("O");
 			}
 
-			var (device, sync) = GetDeviceClient(id);
+			await Task.CompletedTask;
+		}
 
-			await sync.WaitAsync().ConfigureAwait(false);
+		public virtual async Task UpdateAsync (uint id, string key, DoubleDict value)
+		{
+			var root = m_Updates.AddOrUpdate(id, (Twin: new TwinCollection(), Time: DateTime.Now),
+																						(_, v) => (Twin: v.Twin, Time: DateTime.Now));
 
-			try {
-				await device.UpdateReportedPropertiesAsync(root).ConfigureAwait(false);
-			} finally { sync.Release(); }
+			lock (root.Twin) {
+				if (value.Count > 0) {
+					var col = new TwinCollection();
+
+					foreach (var kv in value) col[kv.Key] = kv.Value;
+					root.Twin[key] = col;
+				} else {
+					// Remove the property if the entire dictionary is empty
+					root.Twin[key] = null;
+				}
+
+				root.Twin[HeartBeatProperty] = DateTimeOffset.Now.ToString("O");
+			}
+
+			await Task.CompletedTask;
 		}
 
 		public virtual async Task SetAsync (uint id, string key, string field, double value)
 		{
-			var root = new TwinCollection() { [key] = new TwinCollection { [field] = value } };
+			var root = m_Updates.AddOrUpdate(id, (Twin: new TwinCollection(), Time: DateTime.Now),
+																						(_, v) => (Twin: v.Twin, Time: DateTime.Now));
 
-			var (device, sync) = GetDeviceClient(id);
+			lock (root.Twin) {
+				root.Twin[key] = new TwinCollection { [field] = value };
+				root.Twin[HeartBeatProperty] = DateTimeOffset.Now.ToString("O");
+			}
 
-			await sync.WaitAsync().ConfigureAwait(false);
-
-			try {
-				await device.UpdateReportedPropertiesAsync(root).ConfigureAwait(false);
-			} finally { sync.Release(); }
+			await Task.CompletedTask;
 		}
 
-		public virtual async Task SendMessageAsync (uint id, string message)
+		public virtual async Task SendMessageAsync (uint id, byte[] message)
 		{
 			if (message == null) throw new ArgumentNullException(nameof(message));
+			if (message.Length <= 0) return;
 
-			var msg = new Microsoft.Azure.Devices.Client.Message(Encoding.UTF8.GetBytes(message));
+			var msg = new Microsoft.Azure.Devices.Client.Message(message);
 
-			var (device, sync) = GetDeviceClient(id);
+			var device = GetDeviceClient(id);
 
-			await sync.WaitAsync().ConfigureAwait(false);
+			await m_Lock.WaitAsync().ConfigureAwait(false);
 
 			try {
 				await device.SendEventAsync(msg).ConfigureAwait(false);
-			} finally { sync.Release(); }
+				await Task.Delay((int) MessageThrottle);
+			} finally { m_Lock.Release(); }
 		}
 
 		public IEnumerable<(uint id, string key, string field, object value, DateTimeOffset timestamp)> Dump () =>

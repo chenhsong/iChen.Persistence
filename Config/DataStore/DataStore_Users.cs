@@ -15,11 +15,9 @@ namespace iChen.Persistence.Server
 			if (orgId == null && string.IsNullOrWhiteSpace(orgId)) throw new ArgumentNullException(nameof(orgId));
 
 			using (var db = new ConfigDB(m_Schema)) {
-				if (orgId == null) {
-					return await db.Users.AsNoTracking().ToListAsync().ConfigureAwait(false);
-				} else {
-					return await db.Users.AsNoTracking().Where(user => user.OrgId.Equals(orgId, StringComparison.OrdinalIgnoreCase)).ToListAsync().ConfigureAwait(false);
-				}
+				return (orgId == null)
+					? await db.Users.AsNoTracking().ToListAsync().ConfigureAwait(false)
+					: await db.Users.AsNoTracking().Where(user => user.OrgId.Equals(orgId, StringComparison.OrdinalIgnoreCase)).ToListAsync().ConfigureAwait(false);
 			}
 		}
 
@@ -42,20 +40,12 @@ namespace iChen.Persistence.Server
 		/// <remarks>This method is thread-safe.</remarks>
 		public static async Task AddUserAsync (string orgId, string password, string name, Filters filters, byte level, bool enabled)
 		{
-			if (string.IsNullOrWhiteSpace(orgId)) throw new ArgumentNullException(nameof(orgId));
-			if (string.IsNullOrWhiteSpace(password)) throw new ArgumentNullException(nameof(password));
-			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
-
-			orgId = orgId.Trim();
-			password = password.Trim();
-			name = name.Trim();
-
 			var user = new User()
 			{
-				OrgId = orgId,
-				Password = password,
+				OrgId = !string.IsNullOrWhiteSpace(orgId) ? orgId.Trim() : throw new ArgumentNullException(nameof(orgId)),
+				Password = !string.IsNullOrWhiteSpace(password) ? password.Trim() : throw new ArgumentNullException(nameof(password)),
 				IsEnabled = enabled,
-				Name = name,
+				Name = !string.IsNullOrWhiteSpace(name) ? name.Trim() : throw new ArgumentNullException(nameof(name)),
 				Filters = filters,
 				AccessLevel = level
 			};
@@ -83,11 +73,9 @@ namespace iChen.Persistence.Server
 		{
 			if (string.IsNullOrWhiteSpace(orgId)) throw new ArgumentNullException(nameof(orgId));
 			if (string.IsNullOrWhiteSpace(password)) throw new ArgumentNullException(nameof(password));
-			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
 
 			orgId = orgId.Trim();
 			password = password.Trim();
-			name = name.Trim();
 
 			using (var db = new ConfigDB(m_Schema)) {
 				var user = await db.Users
@@ -102,7 +90,7 @@ namespace iChen.Persistence.Server
 														.ConfigureAwait(false);
 				if (ux != null) throw new ApplicationException($"User name already exists in org {orgId}: {name}");
 
-				user.Name = name;
+				user.Name = !string.IsNullOrWhiteSpace(name) ? name.Trim() : throw new ArgumentNullException(nameof(name));
 				user.IsEnabled = enabled;
 				user.Filters = filters;
 				user.AccessLevel = level;

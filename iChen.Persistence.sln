@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
-VisualStudioVersion = 15.0.26730.8
+VisualStudioVersion = 15.0.27130.2027
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Config", "Config\Config.csproj", "{FDAFE94E-1D4F-4A92-89F5-F80A26BCD202}"
 EndProject
@@ -9,8 +9,9 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Cloud", "Cloud\Cloud.csproj
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Analytics", "Analytics\Analytics.csproj", "{A87ADB14-3571-49AA-B872-B5D0AE444952}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Root", "Root", "{391115F2-B143-491D-9BAA-620DEDFAB43A}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Root", "Root", "{1A3827C6-F9E6-4505-9EB3-5297BD132B9A}"
 	ProjectSection(SolutionItems) = preProject
+		CHANGES.md = CHANGES.md
 		README.md = README.md
 	EndProjectSection
 EndProject
