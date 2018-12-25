@@ -23,3 +23,23 @@ Breaking Changes
 
 - Azure Table Storage driver now accepts both HTTP and HTTPS
   protocols, selected via a parameter to the constructor.
+
+- Requires `iChen.OpenProtocol.dll` version 4.2 and up.
+
+
+Release 4.1.1
+=============
+
+New Features
+------------
+
+- Added support for SQLite configuration database.
+
+- Add Azure IOT Hub as a shared cache provider.
+
+Breaking Changes
+----------------
+
+- Requires `iChen.OpenProtocol.dll` version 4.1.1 and up.
+
+- Requires C# 7.2 and up.
