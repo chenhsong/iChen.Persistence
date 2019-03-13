@@ -224,7 +224,7 @@ namespace iChen.Persistence.Cloud
 		internal virtual void AddSqlParameters (DbParameterCollection parameters, Func<string, DbType, int, object, DbParameter> makeParam)
 		{
 			parameters.Add(makeParam("OrgId", DbType.String, 100, OrgId));
-			parameters.Add(makeParam("Controller", DbType.Int32, 0, Controller));
+			parameters.Add(makeParam("Controller", DbType.Int32, 0, (int) Controller));
 			parameters.Add(makeParam("Time", DbType.DateTime, 2, Time.ToUniversalTime().UtcDateTime));
 		}
 	}
@@ -495,8 +495,8 @@ namespace iChen.Persistence.Cloud
 			base.AddSqlParameters(parameters, makeParam);
 
 			parameters.Add(makeParam("Operator", DbType.Int32, 0, OperatorId));
-			parameters.Add(makeParam("OpMode", DbType.Byte, 0, OpMode));
-			parameters.Add(makeParam("JobMode", DbType.Byte, 0, JobMode));
+			parameters.Add(makeParam("OpMode", DbType.Byte, 0, (byte) OpMode));
+			parameters.Add(makeParam("JobMode", DbType.Byte, 0, (byte) JobMode));
 			parameters.Add(makeParam("JobCard", DbType.String, 100, (object) JobCardId ?? DBNull.Value));
 			parameters.Add(makeParam("Mold", DbType.String, 100, (object) MoldId ?? DBNull.Value));
 			parameters.Add(makeParam("UniqueID", DbType.String, 100, (object) ID ?? DBNull.Value));
@@ -763,9 +763,9 @@ namespace iChen.Persistence.Cloud
 			parameters.Add(makeParam("GeoLatitude", DbType.Double, 0, GeoLatitude.HasValue ? (object) GeoLatitude.Value : DBNull.Value));
 			parameters.Add(makeParam("GeoLongitude", DbType.Double, 0, GeoLongitude.HasValue ? (object) GeoLongitude.Value : DBNull.Value));
 			parameters.Add(makeParam("Connected", DbType.Boolean, 0, Connected.HasValue ? (object) Connected.Value : DBNull.Value));
-			parameters.Add(makeParam("OpMode", DbType.Byte, 0, OpMode.HasValue ? (object) OpMode : DBNull.Value));
-			parameters.Add(makeParam("JobMode", DbType.Byte, 0, JobMode.HasValue ? (object) JobMode : DBNull.Value));
-			parameters.Add(makeParam("Operator", DbType.Int32, 0, OperatorId.HasValue ? (object) (int) OperatorId : DBNull.Value));
+			parameters.Add(makeParam("OpMode", DbType.Byte, 0, OpMode.HasValue ? (object) (byte) OpMode.Value : DBNull.Value));
+			parameters.Add(makeParam("JobMode", DbType.Byte, 0, JobMode.HasValue ? (object) (byte) JobMode.Value : DBNull.Value));
+			parameters.Add(makeParam("Operator", DbType.Int32, 0, OperatorId.HasValue ? (object) OperatorId.Value : DBNull.Value));
 			parameters.Add(makeParam("JobCard", DbType.String, 100, (object) JobCardId ?? DBNull.Value));
 			parameters.Add(makeParam("Mold", DbType.Guid, 0, (object) MoldId ?? DBNull.Value));
 		}
