@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace iChen.Persistence.Server
 {
-	partial class MoldSettingMapping : IEntityTypeConfiguration<MoldSetting>
+	internal partial class MoldSettingMapping : IEntityTypeConfiguration<MoldSetting>
 	{
 		private string m_Schema = null;
 		private ushort m_Version = 0;
@@ -22,6 +22,11 @@ namespace iChen.Persistence.Server
 			entity.Property(x => x.MoldId).HasColumnName("MoldId").IsRequired();//.HasColumnType("int");
 			entity.Property(x => x.Offset).HasColumnName("Offset").IsRequired();//.HasColumnType("smallint");
 			entity.Property(x => x.Value).HasColumnName("Value").IsRequired();//.HasColumnType("smallint");
+
+			if (m_Version >= ConfigDB.Version_MoldSetting_Variable) {
+				entity.Property(x => x.Variable).HasColumnName("Variable");//.HasColumnType("int");
+			}
+
 			entity.Ignore(x => x.RawData);
 			entity.Property(x => x.Created).HasColumnName("Created").IsRequired();//.HasColumnType("datetime");
 			entity.Property(x => x.Modified).HasColumnName("Modified");//.HasColumnType("datetime");

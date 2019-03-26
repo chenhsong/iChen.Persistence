@@ -4,12 +4,13 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <AssemblyName>iChen.Analytics</AssemblyName>
     <RootNamespace>iChen.Analytics</RootNamespace>
-    <Version>4.2</Version>
+    <Version>4.3</Version>
     <Authors />
     <Company>Chen Hsong Holdings Ltd.</Company>
     <Product>iChen Analytics</Product>
-    <Description>Cloud-based data persistence layer for iChen 4.2.</Description>
+    <Description>Cloud-based data persistence layer for iChen 4.3.</Description>
     <Copyright>Copyright © 2016-2018 by Chen Hsong Holdings Ltd.  All rights reserved.</Copyright>
+    <AssemblyVersion>4.3.0.0</AssemblyVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
@@ -21,7 +22,7 @@
     <PackageReference Include="Microsoft.DotNet.Analyzers.Compatibility" Version="0.1.2-alpha" />
     <PackageReference Include="Microsoft.Windows.Compatibility" Version="2.0.1" />
     <PackageReference Include="System.Memory" Version="4.5.1" />
-    <PackageReference Include="WindowsAzure.Storage" Version="9.3.1" />
+    <PackageReference Include="WindowsAzure.Storage" Version="9.3.3" />
   </ItemGroup>
 
   <ItemGroup>
@@ -31,7 +32,7 @@
 
   <ItemGroup>
     <Reference Include="iChen.OpenProtocol">
-      <HintPath>..\lib\iChen.OpenProtocol.dll</HintPath>
+      <HintPath>..\lib\iChen.OpenProtocol\iChen.OpenProtocol.dll</HintPath>
     </Reference>
   </ItemGroup>
 

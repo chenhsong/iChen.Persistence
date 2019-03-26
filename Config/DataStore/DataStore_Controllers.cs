@@ -85,7 +85,7 @@ namespace iChen.Persistence.Server
 				OrgId = !string.IsNullOrWhiteSpace(orgId) ? orgId.Trim() : throw new ArgumentNullException(nameof(orgId)),
 				IsEnabled = enabled,
 				Name = !string.IsNullOrWhiteSpace(name) ? name.Trim() : throw new ArgumentNullException(nameof(name)),
-				Type = (type > 0) ? type : throw new ArgumentOutOfRangeException(nameof(type)),
+				Type = (type >= 0) ? type : throw new ArgumentOutOfRangeException(nameof(type)),
 				Version = !string.IsNullOrWhiteSpace(version) ? version.Trim() : throw new ArgumentNullException(nameof(version)),
 				Model = !string.IsNullOrWhiteSpace(model) ? model.Trim() : throw new ArgumentNullException(nameof(model)),
 				IP = ProcessIPAddress(IPAddress) ?? throw new ArgumentOutOfRangeException(nameof(IPAddress)),

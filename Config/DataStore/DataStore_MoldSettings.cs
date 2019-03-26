@@ -48,18 +48,19 @@ namespace iChen.Persistence.Server
 		}
 
 		/// <remarks>This method is thread-safe.</remarks>
-		public static async Task AddMoldSettingsAsync (int moldId, IList<ushort> data)
+		public static async Task AddMoldSettingsAsync (int moldId, IList<ulong> data)
 		{
-			var dict = new Dictionary<ushort, ushort>();
+			var dict = new Dictionary<ushort, ulong>();
 			for (var x = 0; x < data.Count; x++) {
 				// Make sure the last item is always stored to keep the accurate length of the whole data set
-				if (x >= data.Count - 1 || data[x] != 0) dict[(ushort) x] = data[x];
+				// Lower 16 bits = Actual ushort value
+				if (x >= data.Count - 1 || (data[x] & 0x0000ffff) != 0) dict[(ushort) x] = data[x];
 			}
 			await AddMoldSettingsAsync(moldId, dict).ConfigureAwait(false);
 		}
 
 		/// <remarks>This method is thread-safe.</remarks>
-		public static async Task AddMoldSettingsAsync (int moldId, IReadOnlyDictionary<ushort, ushort> data)
+		public static async Task AddMoldSettingsAsync (int moldId, IReadOnlyDictionary<ushort, ulong> data)
 		{
 			if (moldId <= 0) throw new ArgumentOutOfRangeException(nameof(moldId));
 			if (data == null) throw new ArgumentNullException(nameof(data));
@@ -71,11 +72,17 @@ namespace iChen.Persistence.Server
 					throw new ApplicationException($"Some MoldId/Offset already exist.");
 
 				foreach (var kv in data) {
+					// Lower 16 bits = Actual ushort value
+					var value = (ushort) (kv.Value & 0x0000ffff);
+					// Upper 32 bits = Hash of variable name
+					var variable = (int) ((kv.Value >> 16) & 0x00000000ffffffff);
+
 					db.MoldSettings.Add(new MoldSetting()
 					{
 						MoldId = moldId,
 						Offset = (short) kv.Key,
-						RawData = kv.Value
+						RawData = value,
+						Variable = variable
 					});
 				}
 
@@ -84,18 +91,19 @@ namespace iChen.Persistence.Server
 		}
 
 		/// <remarks>This method is thread-safe.</remarks>
-		public static async Task ReplaceMoldSettingsAsync (int moldId, IList<ushort> data)
+		public static async Task ReplaceMoldSettingsAsync (int moldId, IList<ulong> data)
 		{
-			var dict = new Dictionary<ushort, ushort>();
+			var dict = new Dictionary<ushort, ulong>();
 			for (var x = 0; x < data.Count; x++) {
 				// Make sure the last item is always stored to keep the accurate length of the whole data set
-				if (x >= data.Count - 1 || data[x] != 0) dict[(ushort) x] = data[x];
+				// Lower 16 bits = Actual ushort value
+				if (x >= data.Count - 1 || (data[x] & 0x0000ffff) != 0) dict[(ushort) x] = data[x];
 			}
 			await ReplaceMoldSettingsAsync(moldId, dict).ConfigureAwait(false);
 		}
 
 		/// <remarks>This method is thread-safe.</remarks>
-		public static async Task ReplaceMoldSettingsAsync (int moldId, IReadOnlyDictionary<ushort, ushort> data)
+		public static async Task ReplaceMoldSettingsAsync (int moldId, IReadOnlyDictionary<ushort, ulong> data)
 		{
 			if (moldId <= 0) throw new ArgumentOutOfRangeException(nameof(moldId));
 			if (data == null) throw new ArgumentNullException(nameof(data));
@@ -106,11 +114,17 @@ namespace iChen.Persistence.Server
 				await db.SaveChangesAsync().ConfigureAwait(false);
 
 				foreach (var kv in data) {
+					// Lower 16 bits = Actual ushort value
+					var value = (ushort) (kv.Value & 0x0000ffff);
+					// Upper 32 bits = Hash of variable name
+					var variable = (int) ((kv.Value >> 16) & 0x00000000ffffffff);
+
 					db.MoldSettings.Add(new MoldSetting()
 					{
 						MoldId = moldId,
 						Offset = (short) kv.Key,
-						RawData = kv.Value
+						RawData = value,
+						Variable = variable
 					});
 				}
 

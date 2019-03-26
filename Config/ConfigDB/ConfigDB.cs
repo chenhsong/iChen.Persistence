@@ -14,6 +14,7 @@ namespace iChen.Persistence.Server
 		public const ushort Version_Controller_LockIP = 2;
 		public const ushort Version_Controller_Geo = 3;
 		public const ushort Version_Controller_TimeZoneOffset = 100;
+		public const ushort Version_MoldSetting_Variable = 4;
 
 		public string Schema { get; private set; } = null;
 		public ushort Version { get; private set; } = 1;

@@ -76,19 +76,21 @@ namespace iChen.Persistence.Cloud
 			}
 		}
 
-		private void RethrowAzureIotHubException (uint id, IotHubException ex)
+		private Exception TranslateUnauthorizedAccessException (uint id, IotHubException ex)
 		{
 			switch (ex) {
-				case DeviceNotFoundException _: throw new UnauthorizedAccessException($"Device {id} is not registered on Azure IOT Hub!", ex);
-				case DeviceDisabledException _: throw new UnauthorizedAccessException($"Device {id} is disabled!", ex);
-				case DeviceMaximumQueueDepthExceededException _: throw new UnauthorizedAccessException($"Too many messages pending Device {id}: {ex.Message}", ex);
-				case MessageTooLargeException _: throw new UnauthorizedAccessException($"Message sent to Device {id} is too large: {ex.Message}", ex);
-				case QuotaExceededException _: throw new UnauthorizedAccessException($"Azure IOT Hub quota exceeded: {ex.Message}", ex);
-				case IotHubThrottledException _: throw new UnauthorizedAccessException($"Azure IOT Hub bandwidth exceeded: {ex.Message}", ex);
+				case DeviceNotFoundException _: return new UnauthorizedAccessException($"Device {id} is not registered on Azure IOT Hub!", ex);
+				case DeviceDisabledException _: return new UnauthorizedAccessException($"Device {id} is disabled!", ex);
+				case DeviceMaximumQueueDepthExceededException _: return new UnauthorizedAccessException($"Too many messages pending Device {id}: {ex.Message}", ex);
+				case MessageTooLargeException _: return new UnauthorizedAccessException($"Message sent to Device {id} is too large: {ex.Message}", ex);
+				case QuotaExceededException _: return new UnauthorizedAccessException($"Azure IOT Hub quota exceeded: {ex.Message}", ex);
+				case IotHubThrottledException _: return new UnauthorizedAccessException($"Azure IOT Hub bandwidth exceeded: {ex.Message}", ex);
 				case UnauthorizedException _:
-					throw new UnauthorizedAccessException(m_Server != null
+					return new UnauthorizedAccessException(m_Server != null
 												? $"Access to Azure IOT Hub is refused!"
 												: $"Device {id} is not enabled on Azure IOT Hub or access to Azure IOT Hub is refused!", ex);
+
+				default: return null;
 			}
 		}
 
@@ -115,39 +117,61 @@ namespace iChen.Persistence.Cloud
 					var retry = Retry;
 
 					for (; ; ) {
+						Exception failure = null;
+
 						await m_Lock.WaitAsync().ConfigureAwait(false);
 
-						try {
-							BeforeTwinUpdate(id, retry < Retry);
+						BeforeTwinUpdate(id, retry < Retry);
 
+						try {
 							//if (m_Server != null) {
 							//	await m_Server.UpdateTwinAsync(id.ToString(), twin, null).ConfigureAwait(false);
 							//} else {
 							DeviceClient device = GetDeviceClient(id);
 							await device.UpdateReportedPropertiesAsync(twin).ConfigureAwait(false);
 							//}
-
-							AfterTwinUpdate(id, retry < Retry);
-							await Task.Delay((int) WriteThrottle);
-							break;
 						} catch (IotHubException ex) {
-							try { RethrowAzureIotHubException(id, ex); } catch (Exception ex2) {
-								// Azure IOT Hub exception
-								OnError(id, ex2);
+							// Azure IOT Hub exception
+							failure = TranslateUnauthorizedAccessException(id, ex);
+
+							if (failure != null) {
+								// Unauthorized access, don't bother to retry
+								OnError(id, failure);
 								break;
+							} else if (retry <= 0) {
+								// No more retries
+								failure = ex;
+								OnError(id, new ApplicationException($"Error when updating Azure IOT Hub device {id}!", ex));
+								break;
+							} else {
+								failure = ex;
+								// Wait for retry...
 							}
 						} catch (Exception ex) {
+							failure = ex;
+
 							if (retry <= 0) {
 								// No more retries
 								OnError(id, new ApplicationException($"Error when updating Azure IOT Hub device {id}!", ex));
 								break;
 							}
 
-							// Retry after a wait
-							await Task.Delay((new Random()).Next(3000) + 2000);
-							retry--;
-							OnRetry(id, Retry - retry, ex);
+							// Wait for retry...
 						} finally { m_Lock.Release(); }
+
+						if (failure == null) {
+							AfterTwinUpdate(id, retry < Retry);
+							await Task.Delay((int) WriteThrottle).ConfigureAwait(false);
+
+							// Exit loop after a wait
+							break;
+						} else {
+							await Task.Delay((new Random()).Next(3000) + 2000).ConfigureAwait(false);
+
+							// Retry after a wait
+							retry--;
+							OnRetry(id, Retry - retry, failure);
+						}
 					}
 				}
 
@@ -165,7 +189,7 @@ namespace iChen.Persistence.Cloud
 
 		private DeviceClient GetDeviceClient (uint id) =>
 			m_Clients.GetOrAdd(id, k => {
-				DeviceClient device = DeviceClient.CreateFromConnectionString(string.Format(m_DeviceConnectionStringFormat, k), Microsoft.Azure.Devices.Client.TransportType.Mqtt);
+				DeviceClient device = DeviceClient.CreateFromConnectionString(string.Format(m_DeviceConnectionStringFormat, k), Microsoft.Azure.Devices.Client.TransportType.Amqp);
 				device.OperationTimeoutInMilliseconds = TimeOutInterval;
 				return device;
 			});
@@ -254,8 +278,8 @@ namespace iChen.Persistence.Cloud
 				await Task.Delay((int) ReadThrottle).ConfigureAwait(false);
 				return twin;
 			} catch (IotHubException ex) {
-				RethrowAzureIotHubException(id, ex);
-				throw;
+				var ex2 = TranslateUnauthorizedAccessException(id, ex);
+				if (ex2 == ex) throw; else throw ex2;
 			} finally { m_Lock.Release(); }
 		}
 

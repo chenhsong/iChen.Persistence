@@ -1,7 +1,7 @@
 ﻿iChen® Server Persistence Library
 ================================
 
-This library provides persistence (i.e. storage) facilities to the iChen® System (version 4.2 and up).
+This library provides persistence (i.e. storage) facilities to the iChen® System (version 4.3 and up).
 
 It consists of the following assemblies:
 

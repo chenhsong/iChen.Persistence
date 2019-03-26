@@ -4,11 +4,11 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <AssemblyName>iChen.Persistence.Cloud</AssemblyName>
     <RootNamespace>iChen.Persistence.Cloud</RootNamespace>
-    <Version>4.2</Version>
+    <Version>4.3</Version>
     <Authors />
     <Company>Chen Hsong Holdings Ltd.</Company>
     <Product>iChen Cloud Persistence</Product>
-    <Description>Cloud-based data persistence layer for iChen 4.2.</Description>
+    <Description>Cloud-based data persistence layer for iChen 4.3.</Description>
     <Copyright>Copyright © 2016-2018 by Chen Hsong Holdings Ltd.  All rights reserved.</Copyright>
   </PropertyGroup>
 
@@ -17,13 +17,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Azure.Devices" Version="1.17.0" />
-    <PackageReference Include="Microsoft.Azure.Devices.Client" Version="1.18.0" />
+    <PackageReference Include="Microsoft.Azure.Devices" Version="1.17.2" />
+    <PackageReference Include="Microsoft.Azure.Devices.Client" Version="1.19.0" />
     <PackageReference Include="Microsoft.CSharp" Version="4.5.0" />
     <PackageReference Include="Microsoft.DotNet.Analyzers.Compatibility" Version="0.1.2-alpha" />
     <PackageReference Include="StackExchange.Redis" Version="1.2.6" />
     <PackageReference Include="System.Memory" Version="4.5.1" />
-    <PackageReference Include="WindowsAzure.Storage" Version="9.3.1" />
+    <PackageReference Include="WindowsAzure.Storage" Version="9.3.3" />
   </ItemGroup>
 
   <ItemGroup>
@@ -32,7 +32,7 @@
 
   <ItemGroup>
     <Reference Include="iChen.OpenProtocol">
-      <HintPath>..\lib\iChen.OpenProtocol.dll</HintPath>
+      <HintPath>..\lib\iChen.OpenProtocol\iChen.OpenProtocol.dll</HintPath>
     </Reference>
   </ItemGroup>
 

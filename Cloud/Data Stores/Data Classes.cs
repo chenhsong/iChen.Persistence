@@ -636,7 +636,7 @@ namespace iChen.Persistence.Cloud
 			base.AddSqlParameters(parameters, makeParam);
 
 			parameters.Add(makeParam("Value", DbType.Single, 0, (float) Value));
-			parameters.Add(makeParam("OldValue", DbType.Single, 0, OldValue.HasValue ? (object) OldValue.Value : DBNull.Value));
+			parameters.Add(makeParam("OldValue", DbType.Single, 0, OldValue.HasValue ? (object) (float) OldValue.Value : DBNull.Value));
 			parameters.Add(makeParam("Operator", DbType.Int32, 0, OperatorId));
 		}
 	}

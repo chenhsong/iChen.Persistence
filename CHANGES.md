@@ -1,3 +1,33 @@
+Release 4.3
+===========
+
+Enhancements
+------------
+
+- Added `Variable` field to `MoldSetting` which contains the
+  CRC32 hash of the name of the mold setting variable (if
+  any).
+
+Bug Fixes
+---------
+
+- Fixed a bug preventing adding a controller in 
+  `DataStore.AddControllerAsync` when `type` is zero
+  (which is a valid controller type).
+
+- Fixed a bug that causes ODBC parameters to fail with invalid
+  cast exceptions.
+
+Breaking Changes
+----------------
+
+- `DataStore` methods related to maintaining `MoldSetting`
+  classes now take values that are `ulong`, with the upper
+  32 bits being the CRC32 hash of the variable name (if
+  any, or zero if none), and the lower 16 bits being the
+  actual `ushort` value of the setting variable.
+
+  
 Release 4.2
 ===========
 

@@ -8,6 +8,7 @@ namespace iChen.Persistence.Server
 		public int MoldId { get; set; }
 		public short Offset { get; set; }
 		public short Value { get; set; }
+		public int? Variable { get; set; }
 		public DateTime Created { get; set; } = DateTime.Now;
 		public DateTime? Modified { get; set; }
 
