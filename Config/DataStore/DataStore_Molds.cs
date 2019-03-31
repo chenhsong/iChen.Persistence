@@ -8,6 +8,17 @@ namespace iChen.Persistence.Server
 {
 	public static partial class DataStore
 	{
+		private static (ushort value, int? variable) UnpackMoldSettingValue (ulong value)
+		{
+			// Lower 16 bits = Actual ushort value
+			var dataval = (ushort) (value & 0x0000ffff);
+
+			// Upper 32 bits = Hash of variable name
+			var varhash = (int) ((value >> 16) & 0x00000000ffffffff);
+
+			return (value: dataval, variable: (varhash == 0) ? (int?) null : varhash);
+		}
+
 		/// <remarks>This method is thread-safe.</remarks>
 		public static async Task<ICollection<Mold>> GetAllMoldsAsync ()
 		{
@@ -57,7 +68,7 @@ namespace iChen.Persistence.Server
 		}
 
 		/// <remarks>This method is thread-safe.</remarks>
-		public static async Task<int> AddMoldAsync (string name, int? controller, bool enabled = true, IList<ushort> data = null)
+		public static async Task<int> AddMoldAsync (string name, int? controller, bool enabled = true, IList<ulong> data = null)
 		{
 			var mold = new Mold()
 			{
@@ -75,15 +86,18 @@ namespace iChen.Persistence.Server
 
 				if (data != null) {
 					for (var x = 0; x < data.Count; x++) {
+						(var value, var variable) = UnpackMoldSettingValue(data[x]);
+
 						// Make sure the last item is always stored to keep the accurate length of the whole data set
-						if (x >= data.Count - 1 || data[x] != 0) {
-							db.MoldSettings.Add(new MoldSetting()
-							{
-								Mold = mold,
-								Offset = (short) x,
-								RawData = data[x]
-							});
-						}
+						if (value == 0 && x < data.Count - 1) continue;
+
+						db.MoldSettings.Add(new MoldSetting()
+						{
+							Mold = mold,
+							Offset = (short) x,
+							RawData = value,
+							Variable = variable
+						});
 					}
 				}
 

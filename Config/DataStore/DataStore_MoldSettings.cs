@@ -52,12 +52,13 @@ namespace iChen.Persistence.Server
 		{
 			var dict = new Dictionary<ushort, ulong>();
 			for (var x = 0; x < data.Count; x++) {
-				// Make sure the last item is always stored to keep the accurate length of the whole data set
-				// Lower 16 bits = Actual ushort value
-				if (x >= data.Count - 1 || (data[x] & 0x0000ffff) != 0) dict[(ushort) x] = data[x];
+				(var value, _) = UnpackMoldSettingValue(data[x]);
+				// Skip zeros, but make sure the last item is always stored to keep the accurate length of the whole data set
+				if (x >= data.Count - 1 || value != 0) dict[(ushort) x] = data[x];
 			}
 			await AddMoldSettingsAsync(moldId, dict).ConfigureAwait(false);
 		}
+
 
 		/// <remarks>This method is thread-safe.</remarks>
 		public static async Task AddMoldSettingsAsync (int moldId, IReadOnlyDictionary<ushort, ulong> data)
@@ -71,11 +72,13 @@ namespace iChen.Persistence.Server
 				if (existing.Any(s => data.ContainsKey((ushort) s.Offset)))
 					throw new ApplicationException($"Some MoldId/Offset already exist.");
 
+				int maxkey = (data.Count > 0) ? data.Keys.Max() : 0;
+
 				foreach (var kv in data) {
-					// Lower 16 bits = Actual ushort value
-					var value = (ushort) (kv.Value & 0x0000ffff);
-					// Upper 32 bits = Hash of variable name
-					var variable = (int) ((kv.Value >> 16) & 0x00000000ffffffff);
+					(var value, var variable) = UnpackMoldSettingValue(kv.Value);
+
+					// Skip zeros but always keep the last item
+					if (value == 0 && kv.Key != maxkey) continue;
 
 					db.MoldSettings.Add(new MoldSetting()
 					{
@@ -95,9 +98,9 @@ namespace iChen.Persistence.Server
 		{
 			var dict = new Dictionary<ushort, ulong>();
 			for (var x = 0; x < data.Count; x++) {
-				// Make sure the last item is always stored to keep the accurate length of the whole data set
-				// Lower 16 bits = Actual ushort value
-				if (x >= data.Count - 1 || (data[x] & 0x0000ffff) != 0) dict[(ushort) x] = data[x];
+				(var value, _) = UnpackMoldSettingValue(data[x]);
+				// Skip zeros, but make sure the last item is always stored to keep the accurate length of the whole data set
+				if (x >= data.Count - 1 || value != 0) dict[(ushort) x] = data[x];
 			}
 			await ReplaceMoldSettingsAsync(moldId, dict).ConfigureAwait(false);
 		}
@@ -114,10 +117,7 @@ namespace iChen.Persistence.Server
 				await db.SaveChangesAsync().ConfigureAwait(false);
 
 				foreach (var kv in data) {
-					// Lower 16 bits = Actual ushort value
-					var value = (ushort) (kv.Value & 0x0000ffff);
-					// Upper 32 bits = Hash of variable name
-					var variable = (int) ((kv.Value >> 16) & 0x00000000ffffffff);
+					(var value, var variable) = UnpackMoldSettingValue(kv.Value);
 
 					db.MoldSettings.Add(new MoldSetting()
 					{

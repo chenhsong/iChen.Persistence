@@ -4,18 +4,18 @@ Release 4.3
 Enhancements
 ------------
 
-- Added `Variable` field to `MoldSetting` which contains the
+- Add `Variable` field to `MoldSetting` which contains the
   CRC32 hash of the name of the mold setting variable (if
   any).
 
 Bug Fixes
 ---------
 
-- Fixed a bug preventing adding a controller in 
+- Fix a bug preventing adding a controller in 
   `DataStore.AddControllerAsync` when `type` is zero
   (which is a valid controller type).
 
-- Fixed a bug that causes ODBC parameters to fail with invalid
+- Fix a bug that causes ODBC parameters to fail with invalid
   cast exceptions.
 
 Breaking Changes
@@ -63,7 +63,7 @@ Release 4.1.1
 New Features
 ------------
 
-- Added support for SQLite configuration database.
+- Add support for SQLite configuration database.
 
 - Add Azure IOT Hub as a shared cache provider.
 
